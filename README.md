@@ -14,6 +14,10 @@ apps/
 
 ## 로컬 실행
 
+Windows 11에서 처음 실행하는 경우 아래 문서를 먼저 참고하세요.
+
+- [Windows 11 로컬 PC 실행/테스트 가이드](./설계문서/12_Windows11_로컬PC_실행_테스트_가이드.md)
+
 ```bash
 cp .env.example .env
 npm install
