@@ -12,7 +12,7 @@ export function ApiKeyListPage() {
   return (
     <>
       <Typography.Title level={2}>API Key</Typography.Title>
-      <Table
+      <Table<Record<string, any>>
         rowKey="id"
         loading={isLoading}
         dataSource={data ?? []}

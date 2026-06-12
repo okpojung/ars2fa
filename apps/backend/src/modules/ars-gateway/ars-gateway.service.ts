@@ -1,8 +1,8 @@
 import {
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
-  TooManyRequestsException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AppPlatform, AuthEventType, AuthRequestStatus } from '@prisma/client';
@@ -243,7 +243,7 @@ export class ArsGatewayService {
     const minuteKey = `rate:${apiKey.id}:${Math.floor(Date.now() / 60_000)}`;
     const count = await this.redis.incrementWithTtl(minuteKey, 120);
     if (count > perMinute) {
-      throw new TooManyRequestsException('RATE_LIMIT_EXCEEDED');
+      throw new HttpException('RATE_LIMIT_EXCEEDED', 429);
     }
 
     await this.prisma.apiKey.update({

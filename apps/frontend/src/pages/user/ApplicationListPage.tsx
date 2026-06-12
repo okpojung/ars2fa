@@ -15,7 +15,7 @@ export function ApplicationListPage() {
         <Typography.Title level={2}>API 신청</Typography.Title>
         <Link to="/applications/new"><Button type="primary">신규 신청</Button></Link>
       </Space>
-      <Table
+      <Table<Record<string, any>>
         rowKey="id"
         loading={isLoading}
         dataSource={data ?? []}

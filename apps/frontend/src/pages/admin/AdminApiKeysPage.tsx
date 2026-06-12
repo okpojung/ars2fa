@@ -20,7 +20,7 @@ export function AdminApiKeysPage() {
   return (
     <>
       <Typography.Title level={2}>API Key 운영</Typography.Title>
-      <Table
+      <Table<Record<string, any>>
         rowKey="id"
         loading={isLoading}
         dataSource={data ?? []}
