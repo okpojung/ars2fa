@@ -29,6 +29,8 @@
 
 - 서비스 대표 도메인은 `https://ars2fa.baro.me`를 사용한다.
 - 관리자 콘솔은 같은 도메인의 `https://ars2fa.baro.me/admin` 경로를 사용한다.
+- 프론트엔드 확정 스택은 `React + TypeScript + Vite + React Router + TanStack Query + Zustand`이다.
+- 백엔드 확정 스택은 `NestJS + TypeScript + PostgreSQL + Prisma + Redis + BullMQ`이다.
 - 프론트엔드는 사용자 포털(`/`)과 관리자 콘솔(`/admin`)을 단일 도메인 path 기반으로 제공한다.
 - 백엔드는 포털/관리자 업무 API(`/api/*`)와 모바일 앱용 ARS 인증 API(`/v1/ars/*`)를 논리적으로 분리한다.
 - easymindmap의 React/NestJS/PostgreSQL/Redis 구조는 참고하되, ars2fa는 API 신청/승인/API Key/ARS 인증 로그 중심으로 단순화한다.

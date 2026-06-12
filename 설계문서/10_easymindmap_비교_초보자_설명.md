@@ -559,6 +559,13 @@ ars2fa는 "API 사용 권한과 인증 요청을 운영하는 기능" 중심이�
 
 easymindmap과 ars2fa는 둘 다 React, TypeScript, NestJS, PostgreSQL, Redis 같은 비슷한 기술을 사용할 수 있다.
 
+다만 ars2fa는 아래 스택으로 확정한다.
+
+```text
+Frontend: React + TypeScript + Vite + React Router + TanStack Query + Zustand
+Backend : NestJS + TypeScript + PostgreSQL + Prisma + Redis + BullMQ
+```
+
 하지만 두 시스템이 해결하려는 문제가 다르다.
 
 easymindmap은 사용자가 화면 안에서 계속 무언가를 만들고 고치는 서비스이다. 그래서 프론트엔드가 복잡하고, 실시간 협업과 자동 저장이 중요하다.
@@ -567,8 +574,8 @@ ars2fa는 API 사용을 신청하고 승인받은 뒤, 모바일 앱이 안전�
 
 따라서 ars2fa는 easymindmap의 구조를 그대로 복사하기보다, 아래처럼 필요한 부분만 가져오는 것이 좋다.
 
-1. React + TypeScript 같은 검증된 프론트엔드 기술은 활용한다.
-2. NestJS + PostgreSQL + Redis + Worker 구조는 참고한다.
+1. React + TypeScript + Vite로 가볍고 단순한 프론트엔드를 만든다.
+2. NestJS + PostgreSQL + Prisma + Redis + BullMQ로 명확한 백엔드 구조를 만든다.
 3. easymindmap의 복잡한 편집기/협업 구조는 ars2fa에 필요하지 않다.
 4. ars2fa는 API Key, 인증 로그, 관리자 승인 흐름에 맞게 단순하고 안전하게 설계한다.
 5. 초기에는 Coolify로 작게 시작하고, API 사용 앱이 늘어나면 단계적으로 분리한다.
