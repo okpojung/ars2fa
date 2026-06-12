@@ -1,0 +1,21 @@
+{
+  "name": "ars2fa",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev -ws",
+    "build": "npm run build -ws",
+    "typecheck": "npm run typecheck -ws",
+    "backend:dev": "npm run dev -w @ars2fa/backend",
+    "frontend:dev": "npm run dev -w @ars2fa/frontend",
+    "prisma:generate": "npm run prisma:generate -w @ars2fa/backend",
+    "prisma:migrate": "npm run prisma:migrate -w @ars2fa/backend"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
