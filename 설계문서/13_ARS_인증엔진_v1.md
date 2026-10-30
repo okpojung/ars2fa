@@ -1,0 +1,62 @@
+# 13. ARS 인증 엔진 v1 (사용자 발신형, 0507 랜덤 순환)
+
+2026-10-30 구현. 기존 `barocall.baro.so` 중계(ars-gateway)를 대체한다.
+
+## 1. 원리
+
+사용자가 **본인 휴대폰으로 직접 전화를 건다**(발신 ARS). 서버는 통신사 쪽 기록(다우 AuthLog)으로 발신 휴대폰을 확인한다.
+
+| 약점 | 대응 |
+|---|---|
+| 번호 노출(먼저 걸기, LG U+ 페이나우형) | 인증마다 0507 1,000개 중 하나를 **랜덤 순서로** 짧게 임대. 번호는 화면에 표시하지 않고 앱이 직접 걸거나 PC에서는 QR(`tel:`)로만 전달. 임대 중 그 번호로 전화가 **2건 이상**이면 실패 |
+| 발신번호 조작 | **다우 AuthLog가 있어야** 성공. PBX에 들어온 SIP 발신번호와 AuthLog 발신번호(`an`)가 같아야 함. 2026-10-26 시험에서 010-1234-7777로 조작한 전화의 AuthLog에는 실제 번호가 찍힘 |
+| 발신번호 숨김 / 유선 | 실패(`hidden_caller`, `not_mobile`) |
+| 피싱(남에게 대신 걸게 함) | 통화 첫머리 "본인이 요청한 인증이 아니면 끊으세요. 계속하려면 1번" — 1번을 누르지 않으면 실패(`not_confirmed`). 앱 화면에는 `display_name`과 같은 안내 문구 제공 |
+| 앱 위조(키 도용) | 앱별 정책 OFF/MONITOR/ENFORCE. Android Play Integrity, iOS App Attest 검증 |
+| PC↔전화 사람 불일치 | PC 모드: 통화가 확인되면 ARS가 두 자리 숫자를 읽어 주고 PC에 입력해야 완료 |
+
+## 2. 번호 풀
+
+- 0507 1,000개(old-new `number-pool-0507.json`) → SKB 070 50개(070-5190-1950~1999)에 **목록 순서대로** 20개씩 고정 착신(CallMix 1회 설정).
+- 배정: 전체 번호의 CSPRNG 순열 1개(`VnCycle`)를 만들고 그 순서대로 하나씩 임대. **1,000개를 모두 한 번씩 쓴 뒤에만** 새 순열을 만든다. 임대 중·휴식 중인 번호는 잠시 건너뛰고 같은 회차 안에서 나중에 쓴다.
+- 종료된 번호는 `cooldownSeconds` 동안 휴식.
+- SKB는 Request-URI에 대표번호(070-7875-4442)를, **To 헤더에 실제 착신 070**을 넣는다. 다이얼플랜은 To로 `rn`을 구한다.
+
+## 3. 판정 (PBX → `POST /internal/pbx/verify`)
+
+1. 발신번호 표시·휴대폰 여부
+2. 이 070(rn)으로 착신되는 0507 중, 이 발신번호의 AuthLog(±20초)를 최대 `authlogWaitSeconds` 동안 기다림 → 없으면 `no_authlog`
+3. 그 0507을 임대 중인 세션 → 없으면 `no_session`
+4. 1번 확인 → 아니면 `not_confirmed`
+5. 세션 시작 이후 그 0507의 AuthLog가 정확히 1건 → 아니면 `multiple_calls`
+6. `expected_phone` 일치 → 아니면 `phone_mismatch`
+7. APP: `VERIFIED`. PC: `CALL_CONFIRMED` + 확인 숫자 → PC 입력 후 `VERIFIED`
+8. 확정된 세션은 바뀌지 않음(이후 전화는 `second_call`)
+
+## 4. 고객 API (`/v1/ars/*`)
+
+공통: `api_key`(또는 `Authorization: Bearer`), `mobile_app_name`, `client_platform`(ANDROID/IOS), `package_name`/`bundle_id`.
+
+| 경로 | 설명 |
+|---|---|
+| `POST /v1/ars/integrity/challenge` | 무결성 증명용 1회용 nonce |
+| `POST /v1/ars/integrity/ios/attest` | iOS App Attest 키 등록(`key_id`, `attestation`, `integrity_nonce`) |
+| `POST /v1/ars/sessions` | 인증 시작. `mode`(APP/PC), `purpose`, `expected_phone`, 무결성 필드(`integrity_nonce`+`integrity_token` 또는 `attest_key_id`+`attest_assertion`). 응답 `session_id`, `dial_number`/`dial_uri`(앱이 바로 발신, **화면 표시 금지**), `expires_at`, `display_name`, `notice` |
+| `POST /v1/ars/sessions/status` | `PENDING`·`CALL_CONFIRMED`·`VERIFIED`(이때만 `phone` 원문)·`FAILED`·`EXPIRED`·`CANCELED` |
+| `POST /v1/ars/sessions/pc-code` | PC 모드 확인 숫자 |
+| `POST /v1/ars/sessions/cancel` | 취소 |
+
+## 5. 내부·관리자
+
+- `POST /internal/authlog`: AuthLog 수신기(.180)가 인증 성공한 콜백만 넘김(루프백 + `INTERNAL_API_KEY`).
+- 관리자 콘솔: ARS 진행 현황, 0507 번호 풀(가져오기·중지), 앱 보안(무결성 정책·표시 이름·서명 인증서·Team ID), ARS 설정, **ARS 실통화 시험**(QR).
+- 설정 기본값: 앱 임대 60초, PC 임대 120초, 휴식 120초, AuthLog 대기 6초, 1번 확인 켬, PC 확인 숫자 켬(3회), 휴대폰만.
+
+## 6. 남은 일
+
+- CallMix에서 1,000개 착신을 070-5190-1950~1999로 설정(매장 사용 여부 확인 후, 컬러링·콜멘트 '선택 안함'). 그 전까지 스테이징은 0507-0090-1103 → 070-5190-1900만 사용.
+- 070-5190-1950~1999가 .180 SKB 트렁크로 들어오는지 확인.
+- `ars_auth` Flutter SDK를 새 API로 개정(번호 비표시 자동 발신, 무결성 토큰).
+- Play Integrity 서비스 계정(`GOOGLE_PLAY_INTEGRITY_SA_FILE`), 앱별 서명 인증서·Apple Team ID 등록.
+- 공개 도메인 `ars2fa.baro.me`(DNS·NPM·인증서).
+- 안내 음성은 Google 번역 TTS 시험본. 운영 전 성우 녹음 권장. 앱 이름을 읽어 주려면 앱별 녹음 필요.

@@ -15,6 +15,11 @@ import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage';
 import { AdminApplicationsPage } from '../pages/admin/AdminApplicationsPage';
 import { AdminApiKeysPage } from '../pages/admin/AdminApiKeysPage';
 import { AdminAuthLogsPage } from '../pages/admin/AdminAuthLogsPage';
+import { AdminNumberPoolPage } from '../pages/admin/AdminNumberPoolPage';
+import { AdminArsSettingsPage } from '../pages/admin/AdminArsSettingsPage';
+import { AdminArsSessionsPage } from '../pages/admin/AdminArsSessionsPage';
+import { AdminAppSecurityPage } from '../pages/admin/AdminAppSecurityPage';
+import { AdminArsTestPage } from '../pages/admin/AdminArsTestPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -48,6 +53,11 @@ export const router = createBrowserRouter([
           { path: '/admin/applications', element: <AdminApplicationsPage /> },
           { path: '/admin/api-keys', element: <AdminApiKeysPage /> },
           { path: '/admin/auth-logs', element: <AdminAuthLogsPage /> },
+          { path: '/admin/ars/sessions', element: <AdminArsSessionsPage /> },
+          { path: '/admin/ars/pool', element: <AdminNumberPoolPage /> },
+          { path: '/admin/ars/apps', element: <AdminAppSecurityPage /> },
+          { path: '/admin/ars/settings', element: <AdminArsSettingsPage /> },
+          { path: '/admin/ars/test', element: <AdminArsTestPage /> },
         ],
       },
     ],

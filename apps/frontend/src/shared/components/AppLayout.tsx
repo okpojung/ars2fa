@@ -6,6 +6,10 @@ import {
   KeyOutlined,
   LogoutOutlined,
   SafetyOutlined,
+  PhoneOutlined,
+  NumberOutlined,
+  LockOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { Button, Layout, Menu, Typography } from 'antd';
 import type { MenuProps } from 'antd';
@@ -26,6 +30,11 @@ export function AppLayout() {
         { key: '/admin/applications', icon: <AppstoreOutlined />, label: <Link to="/admin/applications">신청 심사</Link> },
         { key: '/admin/api-keys', icon: <KeyOutlined />, label: <Link to="/admin/api-keys">API Key 운영</Link> },
         { key: '/admin/auth-logs', icon: <SafetyOutlined />, label: <Link to="/admin/auth-logs">인증 로그</Link> },
+        { key: '/admin/ars/sessions', icon: <PhoneOutlined />, label: <Link to="/admin/ars/sessions">ARS 진행 현황</Link> },
+        { key: '/admin/ars/pool', icon: <NumberOutlined />, label: <Link to="/admin/ars/pool">0507 번호 풀</Link> },
+        { key: '/admin/ars/apps', icon: <LockOutlined />, label: <Link to="/admin/ars/apps">앱 보안</Link> },
+        { key: '/admin/ars/settings', icon: <SettingOutlined />, label: <Link to="/admin/ars/settings">ARS 설정</Link> },
+        { key: '/admin/ars/test', icon: <PhoneOutlined />, label: <Link to="/admin/ars/test">ARS 실통화 시험</Link> },
       ]
     : [
         { key: '/', icon: <DashboardOutlined />, label: <Link to="/">대시보드</Link> },
