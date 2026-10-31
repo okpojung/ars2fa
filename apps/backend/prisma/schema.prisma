@@ -384,7 +384,9 @@ model ArsSession {
   callerPhoneHash    String?
   callerPhoneMasked  String?
   callerPhoneEnc     String?          // AES-GCM; returned once to the customer on success
-  pcCode             String?          // 2 digits read out by the ARS (PC mode), cleared when finished
+  pcCode             String?          // PC mode: code shown on the PC after the call connects, keyed in on the phone; cleared when finished
+  dialToken          String?          @unique // PC mode: one-time token of the mobile dial page (QR)
+  codeExpiresAt      DateTime?        // PC mode: deadline for keying in the code
   pcCodeAttempts     Int              @default(0)
   integrityVerdict   IntegrityVerdict @default(NOT_PROVIDED)
   integrityDetail    Json?

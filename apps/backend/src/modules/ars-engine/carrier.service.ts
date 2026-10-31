@@ -12,6 +12,10 @@ export type CarrierResult = { ok: boolean; code: string; message: string; ms: nu
  * rn is always sent because the API treats it as required, also for linkYn=n.
  * Credentials come from CALLMIX_ID / CALLMIX_PW (server env only). Without them the client is disabled and
  * only STATIC numbers can be leased.
+ *
+ * "Off" mode: with CALLMIX_GUARD_RN set, a resting number is not left unforwarded (callers would only hear
+ * ringing) but forwarded to that guard 070, where no authentication ever waits, so the PBX answers with the
+ * "not a valid access" message and hangs up. Without it, off means linkYn=n.
  */
 @Injectable()
 export class CarrierService {
@@ -27,8 +31,11 @@ export class CarrierService {
     const base = (env.CALLMIX_API_BASE ?? 'https://m.callmix.co.kr/cmxapi').replace(/\/+$/, '');
     const shopName = env.CALLMIX_SHOP_NAME ?? 'ARS인증';
     const timeout = Number(env.CALLMIX_TIMEOUT_MS ?? 5000);
+    const guard = (env.CALLMIX_GUARD_RN ?? '').replace(/\D/g, '');
     return async ({ vn, rn, link }) => {
-      const body = new URLSearchParams({ id, pw, vn, rn, linkYn: link ? 'y' : 'n', shopName, colorRing: '0', callMent: '0' });
+      const target = link ? rn : guard || rn;
+      const linkYn = link || guard ? 'y' : 'n';
+      const body = new URLSearchParams({ id, pw, vn, rn: target, linkYn, shopName, colorRing: '0', callMent: '0' });
       const r = await fetch(`${base}/vnMapping`, {
         method: 'POST', body, signal: AbortSignal.timeout(timeout),
         headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },

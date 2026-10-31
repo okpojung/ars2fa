@@ -207,15 +207,39 @@ export class NumberPoolService {
       lines: lines.map((l) => ({ rn: l.rn, numbers: l._count._all })) };
   }
 
-  async list(params: { q?: string; status?: string; skip?: number; take?: number }) {
+  /**
+   * Pool list. sort=random (default): the order of the current random cycle (position = hand-out order);
+   * vn_asc / vn_desc: by 0507 number. Every item carries its position in the current cycle and whether it
+   * was already handed out in this cycle.
+   */
+  async list(params: { q?: string; status?: string; sort?: string; skip?: number; take?: number }) {
     const where: Prisma.VirtualNumberWhereInput = {};
-    if (params.q) where.OR = [{ vn: { contains: params.q.replace(/\D/g, '') } }, { rn: { contains: params.q.replace(/\D/g, '') } }];
+    const digits = (params.q ?? '').replace(/\D/g, '');
+    if (digits) where.OR = [{ vn: { contains: digits } }, { rn: { contains: digits } }];
     if (params.status === 'ACTIVE' || params.status === 'DISABLED') where.status = params.status;
-    const [items, total] = await Promise.all([
-      this.prisma.virtualNumber.findMany({ where, orderBy: { ordinal: 'asc' }, skip: params.skip ?? 0, take: Math.min(params.take ?? 100, 500) }),
-      this.prisma.virtualNumber.count({ where }),
-    ]);
-    return { items, total };
+    const skip = params.skip ?? 0;
+    const take = Math.min(params.take ?? 100, 500);
+    const cycle = await this.prisma.vnCycle.findFirst({ where: { completedAt: null }, orderBy: { cycleNo: 'desc' } });
+    const total = await this.prisma.virtualNumber.count({ where });
+    type Item = Awaited<ReturnType<typeof this.prisma.virtualNumber.findMany>>[number] & { position: number | null; usedInCycle: boolean };
+    let items: Item[];
+    if ((params.sort ?? 'random') === 'random' && cycle) {
+      // numbers of the current cycle in hand-out order, then any number not in the cycle (added later) by inventory order
+      const slots = await this.prisma.vnCycleSlot.findMany({ where: { cycleId: cycle.id, number: where }, orderBy: { position: 'asc' }, skip, take, include: { number: true } });
+      items = slots.map((s) => ({ ...s.number, position: s.position, usedInCycle: !!s.usedAt }));
+      const inCycle = await this.prisma.vnCycleSlot.count({ where: { cycleId: cycle.id, number: where } });
+      if (items.length < take && skip + items.length >= inCycle) {
+        const rest = await this.prisma.virtualNumber.findMany({ where: { ...where, slots: { none: { cycleId: cycle.id } } }, orderBy: { ordinal: 'asc' },
+          skip: Math.max(0, skip - inCycle), take: take - items.length });
+        items.push(...rest.map((n) => ({ ...n, position: null, usedInCycle: false })));
+      }
+    } else {
+      const rows = await this.prisma.virtualNumber.findMany({ where, orderBy: params.sort === 'vn_desc' ? { vn: 'desc' } : params.sort === 'vn_asc' ? { vn: 'asc' } : { ordinal: 'asc' }, skip, take });
+      const slots = cycle ? await this.prisma.vnCycleSlot.findMany({ where: { cycleId: cycle.id, vnId: { in: rows.map((r) => r.id) } } }) : [];
+      const byId = new Map(slots.map((s) => [s.vnId, s]));
+      items = rows.map((n) => ({ ...n, position: byId.get(n.id)?.position ?? null, usedInCycle: !!byId.get(n.id)?.usedAt }));
+    }
+    return { items, total, cycle: cycle ? { cycleNo: cycle.cycleNo, size: cycle.size } : null };
   }
 
   async setStatus(id: number, status: 'ACTIVE' | 'DISABLED', actor: string) {

@@ -13,7 +13,7 @@ import { ApiKeyAuthService, ClientIdentity } from './api-key-auth.service';
 import { ArsSessionService } from './ars-session.service';
 import { ArsSettingsService } from './ars-settings.service';
 import {
-  AppSecurityDto, ArsSettingsDto, AttestRegisterDto, AuthLogDto, ClientDto, CreateSessionDto, ImportPoolDto, PbxHangupDto, PbxPrecheckDto, PbxVerifyDto, PcCodeDto,
+  AppSecurityDto, ArsSettingsDto, AttestRegisterDto, AuthLogDto, ClientDto, CreateSessionDto, ImportPoolDto, PbxCodeDto, PbxHangupDto, PbxPrecheckDto, PbxVerifyDto,
   SessionRefDto, VnStatusDto,
 } from './ars-engine.dto';
 import { IntegrityService } from './integrity/integrity.service';
@@ -69,13 +69,16 @@ export class ArsApiController {
     const c = await this.auth.verify(identity(dto, req), getClientIp(req));
     return this.sessions.cancel(c, dto.session_id);
   }
+}
 
-  @Post('sessions/pc-code')
-  @HttpCode(200)
-  async pcCode(@Body() dto: PcCodeDto, @Req() req: Request) {
-    const c = await this.auth.verify(identity(dto, req), getClientIp(req));
-    return this.sessions.submitPcCode(c, dto.session_id, dto.code);
-  }
+/** Public mobile page data for the PC-mode QR (one-time token, no login). */
+@ApiTags('ars-public')
+@Controller('api/public/ars')
+export class ArsPublicController {
+  constructor(private readonly sessions: ArsSessionService) {}
+
+  @Get('dial/:token')
+  dial(@Param('token') token: string) { return this.sessions.dialPage(token); }
 }
 
 /** Loopback-only endpoints for the Asterisk dialplan (CURL) and the Daou AuthLog receiver. */
@@ -107,8 +110,11 @@ export class ArsInternalController {
   @HttpCode(200)
   async precheck(@Body() dto: PbxPrecheckDto, @Req() req: Request, @Res() res: Response) {
     this.guard(req);
-    res.type('text/plain').send((await this.sessions.precheck(dto.rn)) ? 'OK' : 'NO');
+    res.type('text/plain').send((await this.sessions.precheck(dto.rn, dto.uid, dto.caller)) ? 'OK' : 'NO');
   }
+
+  /**
+   * Right after answering: 
 
   /** Hangup notice from the dialplan (h extension): switch the number's forwarding off now. */
   @Post('pbx/hangup')
@@ -141,8 +147,8 @@ export class ArsAdminController {
 
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Get('pool')
-  list(@Query('q') q?: string, @Query('status') status?: string, @Query('skip') skip?: string, @Query('take') take?: string) {
-    return this.pool.list({ q, status, skip: Number(skip ?? 0), take: Number(take ?? 100) });
+  list(@Query('q') q?: string, @Query('status') status?: string, @Query('sort') sort?: string, @Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.pool.list({ q, status, sort, skip: Number(skip ?? 0), take: Number(take ?? 100) });
   }
 
   @Roles('SUPER_ADMIN')
@@ -223,21 +229,16 @@ export class ArsAdminController {
 
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Post('test/sessions')
-  async testCreate(@Body() dto: { mode?: 'APP' | 'PC'; expected_phone?: string }) {
+  async testCreate(@Body() dto: { mode?: 'APP' | 'PC'; expected_phone?: string; country_code?: string }) {
     const c = await this.testClient();
-    return this.sessionsSvc.create(c, { mode: dto?.mode === 'PC' ? 'PC' : 'APP', purpose: '관리자 시험', expected_phone: dto?.expected_phone || undefined });
+    return this.sessionsSvc.create(c, { mode: dto?.mode === 'PC' ? 'PC' : 'APP', purpose: '관리자 시험', expected_phone: dto?.expected_phone || undefined,
+      country_code: dto?.country_code || undefined });
   }
 
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Get('test/sessions/:sid')
   async testStatus(@Param('sid') sid: string) {
     return this.sessionsSvc.status(await this.testClient(), sid);
-  }
-
-  @Roles('OPERATOR', 'SUPER_ADMIN')
-  @Post('test/sessions/:sid/pc-code')
-  async testPcCode(@Param('sid') sid: string, @Body() dto: { code?: string }) {
-    return this.sessionsSvc.submitPcCode(await this.testClient(), sid, String(dto?.code ?? ''));
   }
 
   @Roles('REVIEWER', 'SUPER_ADMIN')

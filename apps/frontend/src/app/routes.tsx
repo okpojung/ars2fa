@@ -20,11 +20,13 @@ import { AdminArsSettingsPage } from '../pages/admin/AdminArsSettingsPage';
 import { AdminArsSessionsPage } from '../pages/admin/AdminArsSessionsPage';
 import { AdminAppSecurityPage } from '../pages/admin/AdminAppSecurityPage';
 import { AdminArsTestPage } from '../pages/admin/AdminArsTestPage';
+import { MobileDialPage } from '../pages/public/MobileDialPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/signup', element: <SignupPage /> },
   { path: '/admin/login', element: <LoginPage admin /> },
+  { path: '/m/ars/:token', element: <MobileDialPage /> },
   {
     element: <ProtectedRoute />,
     children: [

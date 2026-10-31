@@ -4,11 +4,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 export type ArsSettings = {
   leaseSecondsApp: number;      // time the app has to place the call (forwarding is on only this long)
   leaseSecondsPc: number;       // time for QR scan + call (PC mode)
-  pcCodeSeconds: number;        // PC mode: time to type the 2 digits after the call was confirmed
+  pcCodeSeconds: number;        // PC mode: after the call connects, time to key in the code shown on the PC (DTMF)
+  pcCodeDigits: number;         // PC mode: length of the code shown on the PC
   cooldownSeconds: number;      // a number rests this long after a session ends
   authlogWaitSeconds: number;   // PBX waits at most this long for the carrier AuthLog
   confirmKeyRequired: boolean;  // caller must press 1 after the phishing notice
-  pcCodeEnabled: boolean;       // PC mode: ARS reads 2 digits the user types on the PC
+  pcCodeEnabled: boolean;       // PC mode: the PC shows a code the caller keys in on the phone
   pcCodeMaxAttempts: number;
   mobileOnly: boolean;          // only 010/011/016~019 callers can authenticate
 };
@@ -16,7 +17,8 @@ export type ArsSettings = {
 export const ARS_SETTING_DEFAULTS: ArsSettings = {
   leaseSecondsApp: 30,
   leaseSecondsPc: 30,
-  pcCodeSeconds: 90,
+  pcCodeSeconds: 20,
+  pcCodeDigits: 4,
   cooldownSeconds: 120,
   authlogWaitSeconds: 6,
   confirmKeyRequired: true,
@@ -28,7 +30,8 @@ export const ARS_SETTING_DEFAULTS: ArsSettings = {
 const BOUNDS: Record<string, [number, number]> = {
   leaseSecondsApp: [15, 600],
   leaseSecondsPc: [15, 900],
-  pcCodeSeconds: [30, 600],
+  pcCodeSeconds: [10, 120],
+  pcCodeDigits: [3, 6],
   cooldownSeconds: [0, 3600],
   authlogWaitSeconds: [1, 20],
   pcCodeMaxAttempts: [1, 10],

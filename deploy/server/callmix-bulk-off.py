@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Initial pool stop: sets every DYNAMIC pool number to forwarding OFF (linkYn=n, coloring/comment 0,
-rn = its assigned SKB 070, shopName ARS인증) through CallMix vnMapping, one at a time.
+"""Initial pool stop: puts every resting DYNAMIC pool number into the "off" state through CallMix vnMapping,
+one at a time: with CALLMIX_GUARD_RN set, forwarding on to the guard 070 (answered with the invalid-access
+message); otherwise linkYn=n with rn = its assigned SKB 070. Coloring/comment 0, shopName ARS인증.
 usage: callmix-bulk-off.py LOGFILE [LIMIT] [--only VN,VN]   (credentials from /opt/ars2fa/callmix.env)"""
 import json, subprocess, sys, time, urllib.parse, urllib.request
 env = dict(l.rstrip('\n').split('=', 1) for l in open('/opt/ars2fa/callmix.env') if '=' in l)
@@ -13,12 +14,13 @@ try:
         if j.get('resCd') == 'SUCCESS': done.add(j['vn'])
 except FileNotFoundError: pass
 rows = subprocess.run(['docker', 'exec', 'ars2fa-postgres', 'psql', '-U', 'ars2fa', '-d', 'ars2fa', '-tAc',
-    "SELECT vn||','||rn FROM \"VirtualNumber\" WHERE routing='DYNAMIC' ORDER BY ordinal"], capture_output=True, text=True, check=True).stdout.split()
+    "SELECT vn||','||rn FROM \"VirtualNumber\" WHERE routing='DYNAMIC' AND \"linkState\"='OFF' AND (\"leasedUntil\" IS NULL OR \"leasedUntil\" < now()) ORDER BY ordinal"], capture_output=True, text=True, check=True).stdout.split()
 todo = [r.split(',') for r in rows if r.split(',')[0] not in done and (only is None or r.split(',')[0] in only)][:limit]
 ok = fail = 0
+guard = ''.join(c for c in env.get('CALLMIX_GUARD_RN', '') if c.isdigit())
 with open(log, 'a') as out:
     for vn, rn in todo:
-        body = urllib.parse.urlencode({'id': env['CALLMIX_ID'], 'pw': env['CALLMIX_PW'], 'vn': vn, 'rn': rn, 'linkYn': 'n',
+        body = urllib.parse.urlencode({'id': env['CALLMIX_ID'], 'pw': env['CALLMIX_PW'], 'vn': vn, 'rn': guard or rn, 'linkYn': 'y' if guard else 'n',
             'shopName': 'ARS인증', 'colorRing': '0', 'callMent': '0'}).encode()
         t = time.time()
         try:

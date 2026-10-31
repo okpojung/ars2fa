@@ -200,32 +200,86 @@ describe('call verification', () => {
     expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'e1', t0: new Date(), confirmKey: '1' })).toMatchObject({ reason: 'phone_mismatch' });
   });
 
-  test('PC mode: ARS returns a 2-digit code; wrong entries up to the limit fail, right entry verifies', async () => {
+  test('PC mode: QR page, connect shows the code on the PC, phone keys it in (DTMF) -> VERIFIED; wrong code or no input fails', async () => {
     const { client } = await setup();
-    const r = await sessions.create(client, { mode: 'PC' });
+    await expect(sessions.create(client, { mode: 'PC' })).rejects.toThrow('EXPECTED_PHONE_REQUIRED');
+    await expect(sessions.create(client, { mode: 'PC', expected_phone: '01097111104', country_code: '1' })).rejects.toThrow('UNSUPPORTED_COUNTRY_CODE');
+    const r = await sessions.create(client, { mode: 'PC', expected_phone: '010-9711-1104', country_code: '82' });
+    // the PC never gets the number, only the one-time mobile page
+    expect(r).not.toHaveProperty('dial_number');
+    expect(r.dial_page_url).toMatch(/\/m\/ars\/[A-Za-z0-9_-]{24}$/);
+    const token = r.dial_page_url!.split('/').pop()!;
+    const page = await sessions.dialPage(token);
+    expect(page).toMatchObject({ state: 'READY' });
+    expect(page.tel).toMatch(/^tel:0507-0095-2\d{3}$/);
+    expect(await sessions.dialPage('x'.repeat(24))).toEqual({ state: 'NOT_FOUND' });
+    expect((await sessions.status(client, r.session_id))).not.toHaveProperty('pc_code');
+
     let s = await vnOf(r.session_id);
     await carrierLog(s.vn, '01097111104');
-    const v = await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'p1', t0: new Date(), confirmKey: '1' });
-    expect(v.result).toBe('OK');
-    expect(v.pcCode).toMatch(/^[1-9][0-9]$/);
-    expect((await sessions.status(client, r.session_id)).status).toBe('CALL_CONFIRMED');
-    const wrong = v.pcCode === '10' ? '11' : '10';
-    await sessions.submitPcCode(client, r.session_id, wrong);
-    expect((await sessions.status(client, r.session_id)).status).toBe('CALL_CONFIRMED');
-    const ok = await sessions.submitPcCode(client, r.session_id, v.pcCode!);
-    expect(ok).toMatchObject({ status: 'VERIFIED', phone: '01097111104' });
+    const c1 = await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'p1', t0: new Date(), phase: 'connect' });
+    expect(c1).toMatchObject({ result: 'OK', mode: 'PC', digits: 4 });
+    const st = await sessions.status(client, r.session_id);
+    expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 20 });
+    expect(st.pc_code).toMatch(/^[0-9]{4}$/);
+    expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 15_000);
+    // forwarding switched off as soon as the call is connected
+    expect((await prisma.virtualNumber.findUniqueOrThrow({ where: { id: s.vnId } })).unlinkAfter!.getTime()).toBeLessThanOrEqual(Date.now());
+    expect((await sessions.dialPage(token)).state).toBe('CONNECTED');
+    expect(await sessions.submitPhoneCode('p1', st.pc_code as string)).toMatchObject({ result: 'OK' });
+    expect(await sessions.status(client, r.session_id)).toMatchObject({ status: 'VERIFIED', phone: '01097111104' });
     s = await vnOf(r.session_id);
     expect(s.pcCode).toBeNull();
+    expect(await sessions.submitPhoneCode('p1', '0000')).toMatchObject({ result: 'FAIL', reason: 'second_call' });
 
-    const r2 = await sessions.create(client, { mode: 'PC' });
+    // wrong code: one try only
+    const r2 = await sessions.create(client, { mode: 'PC', expected_phone: '01097111104' });
     const s2 = await vnOf(r2.session_id);
     await carrierLog(s2.vn, '01097111104');
-    const v2 = await sessions.verifyCall({ rn: s2.rn, caller: '01097111104', uniqueId: 'p2', t0: new Date(), confirmKey: '1' });
-    const bad = v2.pcCode === '10' ? '11' : '10';
-    for (let i = 0; i < 3; i++) await sessions.submitPcCode(client, r2.session_id, bad);
-    expect((await sessions.status(client, r2.session_id))).toMatchObject({ status: 'FAILED', fail_reason: 'pc_code_wrong' });
+    await sessions.verifyCall({ rn: s2.rn, caller: '01097111104', uniqueId: 'p2', t0: new Date(), phase: 'connect' });
+    const code2 = (await sessions.status(client, r2.session_id)).pc_code as string;
+    const bad = code2 === '0000' ? '1111' : '0000';
+    expect(await sessions.submitPhoneCode('p2', bad)).toMatchObject({ result: 'FAIL', reason: 'pc_code_wrong' });
+    expect(await sessions.status(client, r2.session_id)).toMatchObject({ status: 'FAILED', fail_reason: 'pc_code_wrong' });
+
+    // no input in time (Read timed out: empty code) -> code_timeout
+    const r3 = await sessions.create(client, { mode: 'PC', expected_phone: '01097111104' });
+    const s3 = await vnOf(r3.session_id);
+    await carrierLog(s3.vn, '01097111104');
+    await sessions.verifyCall({ rn: s3.rn, caller: '01097111104', uniqueId: 'p3', t0: new Date(), phase: 'connect' });
+    expect(await sessions.submitPhoneCode('p3', '')).toMatchObject({ result: 'FAIL', reason: 'code_timeout' });
+
+    // the call never reports back: the sweeper fails the session once the code window is over
+    const r4 = await sessions.create(client, { mode: 'PC', expected_phone: '01097111104' });
+    const s4 = await vnOf(r4.session_id);
+    await carrierLog(s4.vn, '01097111104');
+    await sessions.verifyCall({ rn: s4.rn, caller: '01097111104', uniqueId: 'p4', t0: new Date(), phase: 'connect' });
+    const realNow = sessions.now;
+    sessions.now = () => new Date(Date.now() + 40_000);
+    await sessions.expireDue();
+    sessions.now = realNow;
+    expect(await sessions.status(client, r4.session_id)).toMatchObject({ status: 'FAILED', fail_reason: 'code_timeout' });
   });
 
+  test('PC mode: a different phone than the one typed on the PC fails at connect', async () => {
+    const { client } = await setup();
+    const r = await sessions.create(client, { mode: 'PC', expected_phone: '01011112222' });
+    const s = await vnOf(r.session_id);
+    await carrierLog(s.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'pm', t0: new Date(), phase: 'connect' })).toMatchObject({ result: 'FAIL', reason: 'phone_mismatch' });
+    expect((await vnOf(r.session_id)).status).toBe('FAILED');
+  });
+
+  test('APP mode via connect: connect says APP (no state change), then notice + 1 verifies', async () => {
+    const { client } = await setup();
+    const r = await sessions.create(client, {});
+    const s = await vnOf(r.session_id);
+    await carrierLog(s.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'a1', t0: new Date(), phase: 'connect' })).toMatchObject({ result: 'OK', mode: 'APP' });
+    expect((await vnOf(r.session_id)).status).toBe('PENDING');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'a1', t0: new Date(), confirmKey: '1' })).toMatchObject({ result: 'OK' });
+    expect((await vnOf(r.session_id)).status).toBe('VERIFIED');
+  });
   test('expiry releases the number; cancel works only while active', async () => {
     const { client } = await setup();
     const r = await sessions.create(client, {});
@@ -345,8 +399,8 @@ describe('settings', () => {
   test('validated and audited', async () => {
     await expect(settings.update({ leaseSecondsApp: 5 }, 'a')).rejects.toThrow();
     await expect(settings.update({ confirmKeyRequired: 'yes' as never }, 'a')).rejects.toThrow();
-    const s = await settings.update({ leaseSecondsApp: 90, pcCodeEnabled: false }, 'a');
-    expect(s).toMatchObject({ leaseSecondsApp: 90, pcCodeEnabled: false });
+    const s = await settings.update({ leaseSecondsApp: 90, pcCodeDigits: 6 }, 'a');
+    expect(s).toMatchObject({ leaseSecondsApp: 90, pcCodeDigits: 6 });
     expect(await prisma.auditLog.count({ where: { action: 'ARS_SETTINGS_UPDATE' } })).toBeGreaterThan(0);
   });
 });
@@ -435,18 +489,11 @@ describe('CallMix forwarding per lease', () => {
     expect(await sessions.precheck(s.rn)).toBe(false);
   });
 
-  test('PC mode: after the call the user gets pcCodeSeconds to type the digits', async () => {
-    const { client } = await setup(3);
-    await settings.update({ pcCodeSeconds: 90 }, 'test');
-    const r = await sessions.create(client, { mode: 'PC' });
-    const s = await vnOf(r.session_id);
-    await carrierLog(s.vn, '01097111104');
-    await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'pc9', t0: new Date(), confirmKey: '1' });
-    const after = await vnOf(r.session_id);
-    expect(after.status).toBe('CALL_CONFIRMED');
-    expect(after.expiresAt.getTime()).toBeGreaterThan(Date.now() + 80_000);
+  test('precheck records calls that are not part of any authentication', async () => {
+    await setup(3);
+    expect(await sessions.precheck('07051901900', 'g1', '01097111104')).toBe(false);
+    expect(await prisma.pbxCall.findUniqueOrThrow({ where: { uniqueId: 'g1' } })).toMatchObject({ result: 'FAIL', reason: 'invalid_access', callerMasked: '010****1104' });
   });
-
   test('STATIC numbers are used without any carrier call; without credentials DYNAMIC numbers are not leased', async () => {
     const { client } = await setup(2);
     const rows = await prisma.virtualNumber.findMany({ orderBy: { ordinal: 'asc' } });
@@ -464,7 +511,7 @@ describe('CallMix forwarding per lease', () => {
   });
 
   test('CallMix client sends linkYn, rn, coloring/comment 0 and parses resCd', async () => {
-    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ resCd: 'SUCCESS', resMsg: '' }), { status: 200 }));
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ resCd: 'SUCCESS', resMsg: '' }), { status: 200 }));
     try {
       const c = CarrierService.fromEnv({ CALLMIX_ID: 'idx', CALLMIX_PW: 'pwx' } as NodeJS.ProcessEnv)!;
       expect(await c({ vn: '050700952000', rn: '07051901950', link: false })).toEqual({ resCd: 'SUCCESS', resMsg: '' });
@@ -473,6 +520,14 @@ describe('CallMix forwarding per lease', () => {
       const body = Object.fromEntries(new URLSearchParams(String(init.body)));
       expect(body).toMatchObject({ id: 'idx', pw: 'pwx', vn: '050700952000', rn: '07051901950', linkYn: 'n', colorRing: '0', callMent: '0' });
       expect(CarrierService.fromEnv({} as NodeJS.ProcessEnv)).toBeNull();
+      // guard mode: "off" forwards to the guard line (answered with the invalid-access message); "on" to the assigned 070
+      const g = CarrierService.fromEnv({ CALLMIX_ID: 'idx', CALLMIX_PW: 'pwx', CALLMIX_GUARD_RN: '070-5190-1900' } as NodeJS.ProcessEnv)!;
+      await g({ vn: '050700952000', rn: '07051901950', link: false });
+      await g({ vn: '050700952000', rn: '07051901950', link: true });
+      const off = Object.fromEntries(new URLSearchParams(String((fetchSpy.mock.calls[1] as [string, RequestInit])[1].body)));
+      const on = Object.fromEntries(new URLSearchParams(String((fetchSpy.mock.calls[2] as [string, RequestInit])[1].body)));
+      expect(off).toMatchObject({ rn: '07051901900', linkYn: 'y' });
+      expect(on).toMatchObject({ rn: '07051901950', linkYn: 'y' });
     } finally {
       fetchSpy.mockRestore();
     }

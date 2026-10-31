@@ -22,14 +22,11 @@ export class CreateSessionDto extends IntegrityFieldsDto {
   @IsOptional() @IsString() @MaxLength(100) appsid?: string;
   @IsOptional() @IsString() @MaxLength(40) purpose?: string;
   @IsOptional() @IsString() @MaxLength(20) expected_phone?: string;
+  @IsOptional() @IsString() @Matches(/^\+?[0-9]{1,4}$/) country_code?: string;
 }
 
 export class SessionRefDto extends ClientDto {
   @IsString() @Matches(/^ars_[A-Za-z0-9_-]{10,40}$/) session_id!: string;
-}
-
-export class PcCodeDto extends SessionRefDto {
-  @IsString() @Matches(/^[0-9]{1,4}$/) code!: string;
 }
 
 export class AttestRegisterDto extends ClientDto {
@@ -72,6 +69,14 @@ export class VnStatusDto {
 
 export class PbxPrecheckDto {
   @IsString() @MaxLength(20) rn!: string;
+  @IsOptional() @IsString() @MaxLength(64) uid?: string;
+  @IsOptional() @IsString() @MaxLength(80) caller?: string;
+  @IsOptional() @IsString() @MaxLength(200) key?: string;
+}
+
+export class PbxCodeDto {
+  @IsString() @MaxLength(64) uid!: string;
+  @IsOptional() @IsString() @MaxLength(12) code?: string;
   @IsOptional() @IsString() @MaxLength(200) key?: string;
 }
 
@@ -91,6 +96,7 @@ export class ArsSettingsDto {
   @IsOptional() @IsInt() leaseSecondsApp?: number;
   @IsOptional() @IsInt() leaseSecondsPc?: number;
   @IsOptional() @IsInt() pcCodeSeconds?: number;
+  @IsOptional() @IsInt() pcCodeDigits?: number;
   @IsOptional() @IsInt() cooldownSeconds?: number;
   @IsOptional() @IsInt() authlogWaitSeconds?: number;
   @IsOptional() @IsBoolean() confirmKeyRequired?: boolean;

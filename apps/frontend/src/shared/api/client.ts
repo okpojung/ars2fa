@@ -18,6 +18,14 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    // expired / invalid login: back to the login page instead of showing empty screens
+    const url: string = error.config?.url ?? '';
+    if (error.response?.status === 401 && !url.includes('/auth/login')) {
+      const admin = useAuthStore.getState().principal?.kind === 'admin' || window.location.pathname.startsWith('/admin');
+      useAuthStore.getState().logout();
+      const target = admin ? '/admin/login' : '/login';
+      if (window.location.pathname !== target) window.location.assign(target);
+    }
     const message =
       error.response?.data?.message ??
       error.response?.data?.error_code ??

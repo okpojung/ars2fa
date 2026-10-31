@@ -10,7 +10,7 @@ import { isHiddenCaller, isKrMobile, maskPhone, normalizeKrPhone, openText, phon
 import { VerifiedClient } from './api-key-auth.service';
 
 /** Result line returned to the PBX dialplan. */
-export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: string; sessionId?: string };
+export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: string; sessionId?: string; mode?: 'APP' | 'PC'; digits?: number; readTimeout?: number };
 
 /** Time slack between Daou's callStartTime and our INVITE time (measured INVITE->AuthLog 1-2 s). */
 const AUTHLOG_BEFORE_MS = 20_000;
@@ -22,10 +22,20 @@ export const IN_CALL_UNLINK_MS = 20_000;
 /** How many numbers to try when CallMix refuses to switch one on. */
 const LINK_ATTEMPTS = 3;
 
+/** POST /v1/ars/sessions response. APP: dial_number/dial_uri (dialled by the app, never shown). PC: dial_page_url (QR). */
+export type CreateSessionResult = {
+  session_id: string; status: string; mode: ArsSessionMode; dial_number?: string; dial_uri?: string; dial_page_url?: string;
+  expires_at: string; expires_in: number; display_name: string; integrity: string; notice: string;
+};
+export type DialPageInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string };
+
 export const FAIL_REASONS = [
   'hidden_caller', 'not_mobile', 'not_confirmed', 'no_authlog', 'no_session', 'multiple_calls',
-  'second_call', 'phone_mismatch', 'pc_code_wrong', 'timeout', 'canceled_by_client', 'pool_mismatch',
+  'second_call', 'phone_mismatch', 'pc_code_wrong', 'code_timeout', 'timeout', 'canceled_by_client', 'pool_mismatch', 'invalid_access',
 ] as const;
+
+/** Length of the ARS guidance played (as Read prompt) before/while the caller keys in the PC code. */
+const PC_GUIDE_SECONDS = 5;
 
 @Injectable()
 export class ArsSessionService {
@@ -72,11 +82,15 @@ export class ArsSessionService {
   // ---------------------------------------------------------------------------------------------
 
   async create(client: VerifiedClient, body: IntegrityInput & {
-    mode?: ArsSessionMode; appsid?: string; purpose?: string; expected_phone?: string;
-  }) {
+    mode?: ArsSessionMode; appsid?: string; purpose?: string; expected_phone?: string; country_code?: string;
+  }): Promise<CreateSessionResult> {
     const s = await this.settings.get();
     const mode: ArsSessionMode = body.mode === 'PC' ? 'PC' : 'APP';
     let expectedHash: string | null = null;
+    const cc = (body.country_code ?? '82').replace(/\D/g, '');
+    if (cc !== '82') throw new BadRequestException('UNSUPPORTED_COUNTRY_CODE');
+    // PC mode authenticates a given phone: the number typed on the PC must be the one that calls
+    if (mode === 'PC' && !body.expected_phone) throw new BadRequestException('EXPECTED_PHONE_REQUIRED');
     if (body.expected_phone) {
       const p = normalizeKrPhone(body.expected_phone);
       if (!p || (s.mobileOnly && !isKrMobile(p))) throw new BadRequestException('INVALID_EXPECTED_PHONE');
@@ -91,24 +105,27 @@ export class ArsSessionService {
     // forwarding on only for this session; switched off at expiresAt or when the call is over
     const { leased, expiresAt } = await this.leaseAndLink(ttl, s.cooldownSeconds);
     const sessionId = `ars_${randomBytes(15).toString('base64url')}`;
-    const pcCode = mode === 'PC' && s.pcCodeEnabled ? String(randomInt(10, 100)) : null;
+    // PC mode: code shown on the PC once the call is connected, keyed in on the phone; QR opens a one-time dial page
+    const pcCode = mode === 'PC' ? Array.from({ length: s.pcCodeDigits }, () => String(randomInt(10))).join('') : null;
+    const dialToken = mode === 'PC' ? randomBytes(18).toString('base64url') : null;
     const session = await this.prisma.arsSession.create({
       data: {
         sessionId, apiKeyId: client.apiKeyId, applicationAppId: client.app.id, mobileAppName: client.app.mobileAppName,
         displayName: client.app.displayName || client.app.mobileAppName, clientPlatform: client.app.platform, mode,
         appsid: body.appsid?.slice(0, 100), purpose: body.purpose ?? null, vnId: leased.vnId, vn: leased.vn, rn: leased.rn,
-        expectedPhoneHash: expectedHash, pcCode, integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
+        expectedPhoneHash: expectedHash, pcCode, dialToken, integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
       },
     });
     await this.event(session.id, 'SESSION_CREATED', { mode, cycle: leased.cycleNo, position: leased.position, routing: leased.routing, integrity: integrity.verdict });
     const dial = this.dialString(leased.vn);
+    const base = (process.env.PUBLIC_DIAL_BASE_URL ?? process.env.APP_URL ?? '').replace(/\/+$/, '');
     return {
       session_id: session.sessionId,
       status: session.status,
       mode,
-      // The app dials this itself; it must not be printed on screen (see SDK guide).
-      dial_number: dial,
-      dial_uri: `tel:${dial}`,
+      // APP: the app dials this itself; it must not be printed on screen (see SDK guide).
+      // PC: the number is never given to the PC; the QR carries dial_page_url, a one-time mobile page with a call button.
+      ...(mode === 'PC' ? { dial_page_url: `${base}/m/ars/${dialToken}` } : { dial_number: dial, dial_uri: `tel:${dial}` }),
       expires_at: expiresAt.toISOString(),
       expires_in: ttl,
       display_name: session.displayName,
@@ -130,6 +147,8 @@ export class ArsSessionService {
       phone_masked: s.callerPhoneMasked, integrity: s.integrityVerdict,
       pc_code_required: s.status === 'CALL_CONFIRMED',
     };
+    // PC mode: once the call is connected the PC shows the code to key in on the phone, with its deadline
+    if (s.mode === 'PC' && s.status === 'CALL_CONFIRMED') Object.assign(out, { pc_code: s.pcCode, code_expires_at: s.codeExpiresAt?.toISOString() ?? null, code_seconds: (await this.settings.get()).pcCodeSeconds });
     if (s.status === 'VERIFIED' && s.callerPhoneEnc) out.phone = openText(s.callerPhoneEnc);
     return out;
   }
@@ -141,21 +160,14 @@ export class ArsSessionService {
     return this.status(client, sessionId);
   }
 
-  /** PC mode: the user types the 2 digits the ARS read out. */
-  async submitPcCode(client: VerifiedClient, sessionId: string, code: string) {
-    const s = await this.find(client, sessionId);
-    if (s.status !== 'CALL_CONFIRMED' || !s.pcCode) throw new ConflictException('PC_CODE_NOT_EXPECTED');
-    const max = (await this.settings.get()).pcCodeMaxAttempts;
-    if (String(code ?? '').trim() === s.pcCode) {
-      await this.finish(s, 'VERIFIED', null);
-    } else {
-      const attempts = s.pcCodeAttempts + 1;
-      await this.prisma.arsSession.update({ where: { id: s.id }, data: { pcCodeAttempts: attempts } });
-      if (attempts >= max) await this.finish({ ...s, pcCodeAttempts: attempts }, 'FAILED', 'pc_code_wrong');
-    }
-    return this.status(client, sessionId);
+  /** Mobile dial page (QR, PC mode): call button while the window is open. Public, addressed by an unguessable one-time token. */
+  async dialPage(token: string): Promise<DialPageInfo> {
+    const s = token && /^[A-Za-z0-9_-]{20,40}$/.test(token) ? await this.prisma.arsSession.findUnique({ where: { dialToken: token } }) : null;
+    if (!s) return { state: 'NOT_FOUND' };
+    const open = s.status === 'PENDING' && s.expiresAt.getTime() > this.now().getTime();
+    const state: DialPageInfo['state'] = open ? 'READY' : s.status === 'CALL_CONFIRMED' ? 'CONNECTED' : s.status === 'VERIFIED' ? 'DONE' : s.status === 'PENDING' ? 'EXPIRED' : 'CLOSED';
+    return { state, display_name: s.displayName, expires_at: s.expiresAt.toISOString(), ...(open ? { tel: `tel:${this.dialString(s.vn)}` } : {}) };
   }
-
   private async find(client: VerifiedClient, sessionId: string) {
     const s = await this.prisma.arsSession.findUnique({ where: { sessionId } });
     if (!s || s.apiKeyId !== client.apiKeyId) throw new NotFoundException('SESSION_NOT_FOUND');
@@ -194,10 +206,15 @@ export class ArsSessionService {
    * Answered call, before the notice: is any authentication waiting for a call on this 070 right now?
    * If not, the call is not part of an authentication and the PBX plays the "not a valid access" message.
    */
-  async precheck(rnRaw: string): Promise<boolean> {
+  async precheck(rnRaw: string, uniqueId?: string, callerRaw?: string): Promise<boolean> {
     const rn = (rnRaw ?? '').replace(/\D/g, '').replace(/^82/, '0');
-    if (!rn) return false;
-    const n = await this.prisma.arsSession.count({ where: { rn, status: 'PENDING', expiresAt: { gte: new Date(this.now().getTime() - CALL_GRACE_MS) } } });
+    const n = rn ? await this.prisma.arsSession.count({ where: { rn, status: 'PENDING', expiresAt: { gte: new Date(this.now().getTime() - CALL_GRACE_MS) } } }) : 0;
+    if (n === 0 && uniqueId) {
+      // not part of any authentication (resting number on the guard line, late or repeated call): recorded for monitoring
+      const caller = normalizeKrPhone(callerRaw);
+      await this.prisma.pbxCall.upsert({ where: { uniqueId: uniqueId.slice(0, 64) }, update: {},
+        create: { uniqueId: uniqueId.slice(0, 64), rn, callerHash: caller ? phoneHash(caller) : null, callerMasked: maskPhone(caller), startedAt: this.now(), result: 'FAIL', reason: 'invalid_access' } }).catch(() => undefined);
+    }
     return n > 0;
   }
 
@@ -213,7 +230,14 @@ export class ArsSessionService {
     return { ok: true };
   }
 
-  async verifyCall(input: { rn: string; caller: string; uniqueId: string; t0: Date; confirmKey?: string }): Promise<PbxVerdict> {
+  /**
+   * phase 'connect' (right after the call is answered): identifies the session from the carrier AuthLog and runs every
+   * check that does not need caller input. Passing calls switch the number's forwarding off at once. APP sessions then
+   * get the notice + confirm key (phase 'verify'); PC sessions move to CALL_CONFIRMED and the PC shows the code.
+   * phase 'verify' (APP, after the confirm key): decides the call.
+   */
+  async verifyCall(input: { rn: string; caller: string; uniqueId: string; t0: Date; confirmKey?: string; phase?: 'connect' | 'verify' }): Promise<PbxVerdict> {
+    const phase = input.phase ?? 'verify';
     const s = await this.settings.get();
     const rn = (input.rn ?? '').replace(/\D/g, '').replace(/^82/, '0');
     const caller = normalizeKrPhone(input.caller);
@@ -259,12 +283,14 @@ export class ArsSessionService {
     });
     if (!session) return done({ result: 'FAIL', reason: 'no_session' });
     if (session.rn !== rn) return done({ result: 'FAIL', reason: 'pool_mismatch', sessionId: session.sessionId });
-    await stopSoon(session.vnId);
+    if (phase === 'verify') await stopSoon(session.vnId);
     if (session.status !== 'PENDING') {
       // a second call to an already decided session: never changes the outcome
       await this.event(session.id, 'EXTRA_CALL_REJECTED', { callerMasked: maskPhone(caller) });
       return done({ result: 'FAIL', reason: 'second_call', sessionId: session.sessionId });
     }
+    if (phase === 'connect') return done(await this.connectChecks(session, log, { callerHash, caller, uniqueId: call.uniqueId }, s));
+    if (session.mode === 'PC') return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
     if (s.confirmKeyRequired && input.confirmKey !== '1') {
       await this.finish(session, 'FAILED', 'not_confirmed', { callerHash, caller, uniqueId: call.uniqueId, logId: log.id, at: log.callStartAt });
       return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
@@ -280,16 +306,51 @@ export class ArsSessionService {
       return done({ result: 'FAIL', reason: 'phone_mismatch', sessionId: session.sessionId });
     }
     const callData = { callerHash, caller, uniqueId: call.uniqueId, logId: log.id, at: log.callStartAt };
-    if (session.mode === 'PC' && session.pcCode) {
-      // the user now has pcCodeSeconds to type the digits on the PC (the number itself is switched off)
-      const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData, new Date(this.now().getTime() + s.pcCodeSeconds * 1000));
-      if (!moved) return done({ result: 'FAIL', reason: 'second_call', sessionId: session.sessionId });
-      return done({ result: 'OK', pcCode: session.pcCode, sessionId: session.sessionId });
-    }
     const ok = await this.finish(session, 'VERIFIED', null, callData);
     return done(ok ? { result: 'OK', sessionId: session.sessionId } : { result: 'FAIL', reason: 'second_call', sessionId: session.sessionId });
   }
 
+  private async connectChecks(session: ArsSession, log: { id: string; vn: string; callStartAt: Date },
+    who: { callerHash: string; caller: string; uniqueId: string }, s: Awaited<ReturnType<ArsSettingsService['get']>>): Promise<PbxVerdict> {
+    const callData = { ...who, logId: log.id, at: log.callStartAt };
+    const calls = await this.prisma.authLogEvent.count({ where: { vn: log.vn, callStartAt: { gte: new Date(session.createdAt.getTime() - 5000), lte: new Date(Math.max(this.now().getTime(), log.callStartAt.getTime())) } } });
+    if (calls !== 1) {
+      await this.finish(session, 'FAILED', 'multiple_calls', callData);
+      return { result: 'FAIL', reason: 'multiple_calls', sessionId: session.sessionId };
+    }
+    if (session.expectedPhoneHash && session.expectedPhoneHash !== who.callerHash) {
+      await this.finish(session, 'FAILED', 'phone_mismatch', callData);
+      return { result: 'FAIL', reason: 'phone_mismatch', sessionId: session.sessionId };
+    }
+    // the call is connected: this number takes no further calls (forwarding back to the guard line now)
+    await this.pool.scheduleUnlink(session.vnId, this.now());
+    if (session.mode === 'PC' && session.pcCode) {
+      const codeExpiresAt = new Date(this.now().getTime() + s.pcCodeSeconds * 1000);
+      const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData, { expiresAt: new Date(codeExpiresAt.getTime() + 10_000), codeExpiresAt });
+      if (!moved) return { result: 'FAIL', reason: 'second_call', sessionId: session.sessionId };
+      await this.event(session.id, 'CALL_CONNECTED', { mode: 'PC' });
+      // Read() waits this long after the guidance prompt (digits can also be keyed in during the prompt)
+      return { result: 'OK', mode: 'PC', digits: session.pcCode.length, readTimeout: Math.max(5, s.pcCodeSeconds - PC_GUIDE_SECONDS), sessionId: session.sessionId };
+    }
+    return { result: 'OK', mode: 'APP', sessionId: session.sessionId };
+  }
+
+  /** PC mode: digits keyed in on the phone (DTMF) for the code shown on the PC. One try, within pcCodeSeconds. */
+  async submitPhoneCode(uniqueId: string, codeRaw: string): Promise<PbxVerdict> {
+    const s = await this.prisma.arsSession.findFirst({ where: { pbxUniqueId: (uniqueId ?? '').slice(0, 64), mode: 'PC' }, orderBy: { createdAt: 'desc' } });
+    if (!s) return { result: 'FAIL', reason: 'no_session' };
+    if (s.status !== 'CALL_CONFIRMED') return { result: 'FAIL', reason: s.status === 'VERIFIED' ? 'second_call' : s.failReason ?? 'second_call', sessionId: s.sessionId };
+    const code = String(codeRaw ?? '').replace(/\D/g, '');
+    const late = !s.codeExpiresAt || this.now().getTime() > s.codeExpiresAt.getTime() + 3000;
+    let v: PbxVerdict;
+    if (!code || late) v = { result: 'FAIL', reason: 'code_timeout', sessionId: s.sessionId };
+    else if (code !== s.pcCode) v = { result: 'FAIL', reason: 'pc_code_wrong', sessionId: s.sessionId };
+    else v = { result: 'OK', sessionId: s.sessionId };
+    const moved = await this.finish(s, v.result === 'OK' ? 'VERIFIED' : 'FAILED', v.reason ?? null);
+    if (!moved) return { result: 'FAIL', reason: 'second_call', sessionId: s.sessionId };
+    await this.prisma.pbxCall.updateMany({ where: { uniqueId: s.pbxUniqueId! }, data: { result: v.result, reason: v.reason ?? null } });
+    return v;
+  }
   // ---------------------------------------------------------------------------------------------
   // state machine
   // ---------------------------------------------------------------------------------------------
@@ -297,10 +358,11 @@ export class ArsSessionService {
   private async transition(
     s: Pick<ArsSession, 'id' | 'status'>, to: ArsSessionStatus, reason: string | null,
     call?: { callerHash: string; caller: string; uniqueId: string; logId: string; at: Date },
-    expiresAt?: Date,
+    extra?: { expiresAt?: Date; codeExpiresAt?: Date },
   ): Promise<boolean> {
     const data: Prisma.ArsSessionUpdateManyMutationInput = { status: to, failReason: reason };
-    if (expiresAt) data.expiresAt = expiresAt;
+    if (extra?.expiresAt) data.expiresAt = extra.expiresAt;
+    if (extra?.codeExpiresAt) data.codeExpiresAt = extra.codeExpiresAt;
     if (call) Object.assign(data, { callerPhoneHash: call.callerHash, callerPhoneMasked: maskPhone(call.caller), callerPhoneEnc: sealText(call.caller),
       pbxUniqueId: call.uniqueId, authlogEventId: call.logId, callStartedAt: call.at });
     const final = to === 'VERIFIED' || to === 'FAILED' || to === 'EXPIRED' || to === 'CANCELED';
@@ -335,7 +397,8 @@ export class ArsSessionService {
       { status: 'CALL_CONFIRMED', expiresAt: { lt: now } },
     ] }, take: 500 });
     let n = 0;
-    for (const s of due) n += (await this.finish(s, 'EXPIRED', 'timeout')) ? 1 : 0;
+    // PC: no code keyed in on the phone in time -> failed; otherwise nobody called in time -> expired
+    for (const s of due) n += (await (s.status === 'CALL_CONFIRMED' ? this.finish(s, 'FAILED', 'code_timeout') : this.finish(s, 'EXPIRED', 'timeout'))) ? 1 : 0;
     return n;
   }
 

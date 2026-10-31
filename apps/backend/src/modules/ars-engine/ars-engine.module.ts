@@ -1,7 +1,7 @@
 import { Injectable, Logger, Module, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { RedisService } from '../../common/redis.service';
 import { ApiKeyAuthService } from './api-key-auth.service';
-import { ArsAdminController, ArsApiController, ArsInternalController } from './ars-engine.controller';
+import { ArsAdminController, ArsApiController, ArsInternalController, ArsPublicController } from './ars-engine.controller';
 import { ArsSessionService } from './ars-session.service';
 import { ArsSettingsService } from './ars-settings.service';
 import { CarrierService } from './carrier.service';
@@ -43,7 +43,7 @@ export class ArsSweeper implements OnModuleInit, OnModuleDestroy {
 }
 
 @Module({
-  controllers: [ArsApiController, ArsInternalController, ArsAdminController],
+  controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController],
   providers: [ArsSessionService, NumberPoolService, ArsSettingsService, IntegrityService, ApiKeyAuthService, RedisService, CarrierService, ArsSweeper],
   exports: [ArsSessionService, NumberPoolService, CarrierService],
 })
