@@ -382,13 +382,10 @@ export class ArsSessionService {
     const moved = await this.transition(s, to, reason, call);
     if (!moved) return false;
     await this.pool.release(s.vnId, (await this.settings.get()).cooldownSeconds, this.now());
-    // a call that is still connected (success/failure message, PC digits being read) gets a short grace; otherwise off now
-    let inCall = !!call;
-    if (!inCall && s.pbxUniqueId) {
-      const pc = await this.prisma.pbxCall.findUnique({ where: { uniqueId: s.pbxUniqueId } });
-      inCall = !!pc && !pc.endedAt && this.now().getTime() - pc.startedAt.getTime() < 120_000;
-    }
-    await this.pool.scheduleUnlink(s.vnId, new Date(this.now().getTime() + (inCall ? IN_CALL_UNLINK_MS : 0)));
+    // decided (success or failure): the number takes no further calls, switched back right away.
+    // Verified 2026-10-31 by a live call: switching forwarding mid-call does not drop the connected call.
+    await this.pool.scheduleUnlink(s.vnId, this.now());
+    this.pool.unlinkNow(s.vnId, this.carrier);
     await this.event(s.id, `SESSION_${to}`, { reason });
     return true;
   }

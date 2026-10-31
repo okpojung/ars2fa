@@ -432,20 +432,26 @@ describe('CallMix forwarding per lease', () => {
     expect((await vnOf(r.session_id)).status).toBe('PENDING');
   });
 
-  test('a decided call switches the forwarding off at hangup (or 20 s after the decision)', async () => {
+  test('a decided call switches the forwarding back at once (success or failure)', async () => {
     const { client } = await setup(5);
     const r = await sessions.create(client, {});
     const s = await vnOf(r.session_id);
     await carrierLog(s.vn, '01097111104');
     expect((await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'hx1', t0: new Date(), confirmKey: '1' })).result).toBe('OK');
-    const n1 = await vnRow(s.vnId);
-    expect(n1.unlinkAfter!.getTime()).toBeLessThanOrEqual(Date.now() + 21_000);
-    await sessions.callEnded('hx1');
-    expect(await pool.unlinkDue(carrier, new Date(Date.now() + 100))).toEqual({ done: 1, failed: 0 });
+    await new Promise((res) => setTimeout(res, 300));
+    expect(carrierCalls).toContainEqual({ vn: s.vn, rn: s.rn, link: false });
     expect((await vnRow(s.vnId)).linkState).toBe('OFF');
+    await sessions.callEnded('hx1');
     expect((await prisma.pbxCall.findUniqueOrThrow({ where: { uniqueId: 'hx1' } })).endedAt).not.toBeNull();
-  });
 
+    // a failed call (other phone than expected) too
+    const r2 = await sessions.create(client, { mode: 'PC', expected_phone: '01011112222' });
+    const s2 = await vnOf(r2.session_id);
+    await carrierLog(s2.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s2.rn, caller: '01097111104', uniqueId: 'hx2', t0: new Date(), phase: 'connect' })).toMatchObject({ reason: 'phone_mismatch' });
+    await new Promise((res) => setTimeout(res, 300));
+    expect((await vnRow(s2.vnId)).linkState).toBe('OFF');
+  });
   test('a refused number is skipped (next number tried) and is never handed out until switched off', async () => {
     const { client } = await setup(3);
     const all = await prisma.virtualNumber.findMany({ orderBy: { ordinal: 'asc' } });
