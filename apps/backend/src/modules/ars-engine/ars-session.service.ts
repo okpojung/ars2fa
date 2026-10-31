@@ -324,6 +324,7 @@ export class ArsSessionService {
     }
     // the call is connected: this number takes no further calls (forwarding back to the guard line now)
     await this.pool.scheduleUnlink(session.vnId, this.now());
+    this.pool.unlinkNow(session.vnId, this.carrier);
     if (session.mode === 'PC' && session.pcCode) {
       const codeExpiresAt = new Date(this.now().getTime() + s.pcCodeSeconds * 1000);
       const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData, { expiresAt: new Date(codeExpiresAt.getTime() + 10_000), codeExpiresAt });

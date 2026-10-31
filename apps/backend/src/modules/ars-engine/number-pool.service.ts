@@ -149,6 +149,20 @@ export class NumberPoolService {
       WHERE id = ${vnId} AND routing = 'DYNAMIC' AND "linkState" <> 'OFF'`;
   }
 
+  /**
+   * Switches one number's forwarding back right now (a call to it was just connected). Runs in the background;
+   * if it fails, the number stays UNKNOWN with unlinkAfter = now and the sweeper keeps retrying.
+   */
+  unlinkNow(vnId: number, carrier: Parameters<NumberPoolService['unlinkDue']>[0]) {
+    void (async () => {
+      const n = await this.prisma.virtualNumber.findUnique({ where: { id: vnId } });
+      if (!n || n.routing !== 'DYNAMIC' || n.linkState === 'OFF' || !carrier.enabled) return;
+      const r = await carrier.set(n.id, n.vn, n.rn, false);
+      if (r.ok) await this.prisma.virtualNumber.updateMany({ where: { id: n.id, linkState: { in: ['ON', 'UNKNOWN'] } },
+        data: { linkState: 'OFF', unlinkAfter: null, linkChangedAt: new Date(), linkFailCount: 0, linkError: null } });
+    })().catch(() => undefined);
+  }
+
   /** After a restart: anything possibly forwarded without a schedule is switched off now. */
   async reconcileLinks(now = new Date()) {
     return this.prisma.$executeRaw`UPDATE "VirtualNumber" SET "unlinkAfter" = ${now}

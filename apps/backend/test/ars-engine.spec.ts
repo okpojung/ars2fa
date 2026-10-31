@@ -223,8 +223,10 @@ describe('call verification', () => {
     expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 20 });
     expect(st.pc_code).toMatch(/^[0-9]{4}$/);
     expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 15_000);
-    // forwarding switched off as soon as the call is connected
-    expect((await prisma.virtualNumber.findUniqueOrThrow({ where: { id: s.vnId } })).unlinkAfter!.getTime()).toBeLessThanOrEqual(Date.now());
+    // forwarding switched back as soon as the call is connected (immediate carrier call, no sweeper needed)
+    await new Promise((res) => setTimeout(res, 300));
+    expect(carrierCalls).toContainEqual({ vn: s.vn, rn: s.rn, link: false });
+    expect((await prisma.virtualNumber.findUniqueOrThrow({ where: { id: s.vnId } })).linkState).toBe('OFF');
     expect((await sessions.dialPage(token)).state).toBe('CONNECTED');
     expect(await sessions.submitPhoneCode('p1', st.pc_code as string)).toMatchObject({ result: 'OK' });
     expect(await sessions.status(client, r.session_id)).toMatchObject({ status: 'VERIFIED', phone: '01097111104' });
