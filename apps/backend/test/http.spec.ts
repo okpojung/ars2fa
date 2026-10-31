@@ -78,6 +78,50 @@ test('PC mode end to end over HTTP: dial page -> PBX connect -> code shown -> PB
     .send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'ANDROID', package_name: c.identity.package_name, session_id: created.body.session_id }).expect(200);
   expect(done.body).toMatchObject({ status: 'VERIFIED', phone: '01097111104' });
 });
+test('customer console: own sessions, per-app press-1 setting, key issue/rotate; no hashes in responses', async () => {
+  const srv = app.getHttpServer();
+  await app.get(NumberPoolService).importInventory(numbers(10), LINES);
+  const email = `cust${Date.now()}@ex.com`;
+  await request(srv).post('/api/auth/signup').send({ email, password: 'Abcd123!', companyName: 'Co', contactName: 'N', contactPhone: '01000000000' }).expect(201);
+  const login = await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' }).expect(201);
+  expect(JSON.stringify(login.body)).not.toContain('passwordHash');
+  const auth = { Authorization: `Bearer ${login.body.accessToken}` };
+  const created = await request(srv).post('/api/applications').set(auth)
+    .send({ serviceName: 'Svc', usagePurpose: 'login', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'MyApp', platform: 'ANDROID', packageName: 'com.my.app' }] }).expect(201);
+  // approve the way the admin does (key row created, secret not known to the customer yet)
+  const appRow = await prisma.applicationApp.findFirstOrThrow({ where: { applicationId: created.body.id } });
+  await prisma.apiApplication.update({ where: { id: created.body.id }, data: { status: 'APPROVED' } });
+  await prisma.applicationApp.update({ where: { id: appRow.id }, data: { status: 'APPROVED', integrityPolicy: 'OFF' } });
+  const keyRow = await prisma.apiKey.create({ data: { applicationId: created.body.id, keyPrefix: 'ars_test_xxxx', keyHash: 'h-' + Date.now(), status: 'ACTIVE', monthlyLimit: 100, rateLimitPerMinute: 60 } });
+
+  const keys = await request(srv).get('/api/api-keys').set(auth).expect(200);
+  expect(JSON.stringify(keys.body)).not.toMatch(/keyHash|passwordHash/);
+  const detail = await request(srv).get(`/api/applications/${created.body.id}`).set(auth).expect(200);
+  expect(JSON.stringify(detail.body)).not.toMatch(/keyHash|passwordHash/);
+
+  const rot = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).expect(201);
+  expect(rot.body.apiKey).toBeTruthy();
+  const id = { mobile_app_name: 'MyApp', client_platform: 'ANDROID', package_name: 'com.my.app' };
+  await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(201);
+
+  // press-1 off for this app
+  const set = await request(srv).patch(`/api/console/apps/${appRow.id}/settings`).set(auth).send({ confirmKeyRequired: false, displayName: '내 앱' }).expect(200);
+  expect(set.body).toMatchObject({ confirmKeyRequired: false, displayName: '내 앱' });
+  const s2 = await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(201);
+  expect(s2.body.display_name).toBe('내 앱');
+  expect((await prisma.arsSession.findUniqueOrThrow({ where: { sessionId: s2.body.session_id } })).confirmKey).toBe(false);
+
+  // rotating again invalidates the previous secret
+  const rot2 = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).expect(201);
+  await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(401);
+  expect(rot2.body.apiKey).not.toBe(rot.body.apiKey);
+
+  const mine = await request(srv).get('/api/console/sessions').set(auth).expect(200);
+  expect(mine.body).toHaveLength(2);
+  expect(JSON.stringify(mine.body)).not.toMatch(/callerPhoneEnc|pcCode|dialToken/);
+  // other customers' resources are not reachable
+  await request(srv).patch(`/api/console/apps/does-not-exist/settings`).set(auth).send({ confirmKeyRequired: true }).expect(404);
+});
 test('internal endpoints require the internal key', async () => {
   await request(app.getHttpServer()).post('/internal/authlog').send({ vn: '050700952000', callStartTime: '2026-10-21 10:00:00', callId: '1' }).expect(403);
   await request(app.getHttpServer()).post('/internal/pbx/verify').set('X-Internal-Key', 'x'.repeat(40)).send({ rn: LINES[0], uid: 'u' }).expect(403);

@@ -96,3 +96,14 @@
 - Play Integrity 서비스 계정(`GOOGLE_PLAY_INTEGRITY_SA_FILE`), 앱별 서명 인증서·Apple Team ID 등록.
 - 공개 도메인 `ars2fa.baro.me`(DNS·NPM·인증서).
 - 안내 음성은 Google 번역 TTS 시험본. 운영 전 성우 녹음 권장. 앱 이름을 읽어 주려면 앱별 녹음 필요.
+
+
+## 7. 공개 사이트·고객 콘솔 (2026-10-31)
+
+- `https://ars2fa.baro.me` (Cloudflare DNS 전용 → NPM → .180:9447). 홈페이지(/), 개발자 가이드(/docs), 고객 콘솔(/console), 모바일 인증 화면(/m/ars), 고객 API(/v1/ars)는 공개. 관리자(/admin, /api/admin), API 문서, health는 사무실 IP만.
+- 고객 콘솔: 대시보드, API 신청·앱 설정(안내 서비스 이름, **1번 누르기** 기본값/켬/끔), API Key 발급·재발급(원문 1회 표시, 이전 키 즉시 폐기), 인증 내역(번호 가림).
+- 1번 누르기는 앱별 설정(없으면 서비스 기본값)이 인증 시작 시점에 세션에 고정된다(`ArsSession.confirmKey`). 끈 앱은 다이얼플랜이 안내 없이 바로 판정(`APPN`). 생성 응답에 `confirm_key`.
+- 응답에서 비밀값 제외: Prisma 전역 omit(User/AdminUser.passwordHash, ApiKey.keyHash).
+- 안내 음성: Microsoft 신경망 여성 음성(SunHi)으로 교체, 생성 스크립트 `deploy/voice/gen-female.py`.
+- Flutter SDK: okpojung/ars_auth PR #2 (`ars_login` 2.0.0).
+- 정리: 예전 PHP 포털(.180:9444) 보관 후 제거(/root/archive/ars-portal-retired-20261031-170704), 시험 관리자 계정 삭제.

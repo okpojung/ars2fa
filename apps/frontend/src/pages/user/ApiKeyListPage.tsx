@@ -2,28 +2,25 @@ import { Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiClient } from '../../shared/api/client';
+import { RotateKeyButton } from './RotateKeyButton';
 
 export function ApiKeyListPage() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['api-keys'],
-    queryFn: async () => (await apiClient.get('/api-keys')).data,
-  });
-
+  const { data, isLoading } = useQuery({ queryKey: ['api-keys'], queryFn: async () => (await apiClient.get('/api-keys')).data });
   return (
     <>
       <Typography.Title level={2}>API Key</Typography.Title>
-      <Table<Record<string, any>>
-        rowKey="id"
-        loading={isLoading}
-        dataSource={data ?? []}
+      <Typography.Paragraph type="secondary">
+        API 신청이 승인되면 키가 만들어집니다. [키 발급]을 눌러 키 원문을 받으세요(한 번만 표시). 재발급하면 이전 키는 바로 쓸 수 없게 됩니다.
+      </Typography.Paragraph>
+      <Table<Record<string, any>> rowKey="id" loading={isLoading} dataSource={data ?? []}
         columns={[
-          { title: 'Key', dataIndex: 'keyPrefix' },
+          { title: '서비스', render: (_, r) => <Link to={`/console/applications/${r.applicationId}`}>{r.application?.serviceName}</Link> },
+          { title: 'Key 앞자리', dataIndex: 'keyPrefix', render: (v) => <Typography.Text code>{v}…</Typography.Text> },
           { title: '환경', dataIndex: 'environment' },
-          { title: '상태', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
-          { title: '월 한도', dataIndex: 'monthlyLimit' },
-          { title: '상세', render: (_, record) => <Link to={`/api-keys/${record.id}`}>보기</Link> },
-        ]}
-      />
+          { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
+          { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => v?.toLocaleString() },
+          { title: '', render: (_, r) => r.status !== 'REVOKED' && <RotateKeyButton id={r.id} issued={r.updatedAt !== r.createdAt} /> },
+        ]} />
     </>
   );
 }

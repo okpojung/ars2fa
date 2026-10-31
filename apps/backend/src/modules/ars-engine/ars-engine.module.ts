@@ -5,6 +5,7 @@ import { ArsAdminController, ArsApiController, ArsInternalController, ArsPublicC
 import { ArsSessionService } from './ars-session.service';
 import { ArsSettingsService } from './ars-settings.service';
 import { CarrierService } from './carrier.service';
+import { CustomerConsoleController } from './customer-console.controller';
 import { IntegrityService } from './integrity/integrity.service';
 import { NumberPoolService } from './number-pool.service';
 
@@ -43,7 +44,7 @@ export class ArsSweeper implements OnModuleInit, OnModuleDestroy {
 }
 
 @Module({
-  controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController],
+  controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController, CustomerConsoleController],
   providers: [ArsSessionService, NumberPoolService, ArsSettingsService, IntegrityService, ApiKeyAuthService, RedisService, CarrierService, ArsSweeper],
   exports: [ArsSessionService, NumberPoolService, CarrierService],
 })

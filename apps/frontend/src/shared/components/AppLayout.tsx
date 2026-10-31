@@ -37,18 +37,18 @@ export function AppLayout() {
         { key: '/admin/ars/test', icon: <PhoneOutlined />, label: <Link to="/admin/ars/test">ARS 실통화 시험</Link> },
       ]
     : [
-        { key: '/', icon: <DashboardOutlined />, label: <Link to="/">대시보드</Link> },
-        { key: '/applications', icon: <AppstoreOutlined />, label: <Link to="/applications">API 신청</Link> },
-        { key: '/api-keys', icon: <KeyOutlined />, label: <Link to="/api-keys">API Key</Link> },
-        { key: '/auth-requests', icon: <ApiOutlined />, label: <Link to="/auth-requests">인증 현황</Link> },
-        { key: '/statistics', icon: <BarChartOutlined />, label: <Link to="/statistics">통계</Link> },
+        { key: '/console', icon: <DashboardOutlined />, label: <Link to="/console">대시보드</Link> },
+        { key: '/console/applications', icon: <AppstoreOutlined />, label: <Link to="/console/applications">API 신청·앱 설정</Link> },
+        { key: '/console/api-keys', icon: <KeyOutlined />, label: <Link to="/console/api-keys">API Key</Link> },
+        { key: '/console/sessions', icon: <ApiOutlined />, label: <Link to="/console/sessions">인증 내역</Link> },
+        { key: '/docs', icon: <BarChartOutlined />, label: <Link to="/docs">개발자 가이드</Link> },
       ];
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider breakpoint="lg" collapsedWidth="0">
         <Typography.Title level={4} style={{ color: '#fff', padding: 16, margin: 0 }}>
-          ars2fa
+          <Link to={isAdmin ? '/admin' : '/'} style={{ color: '#fff' }}>ARS2FA</Link>
         </Typography.Title>
         <Menu
           theme="dark"

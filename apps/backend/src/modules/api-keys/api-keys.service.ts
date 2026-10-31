@@ -48,7 +48,7 @@ export class ApiKeysService {
   }
 
   async changeStatus(id: string, status: ApiKeyStatus, adminId: string) {
-    const apiKey = await this.prisma.apiKey.findUnique({ where: { id } });
+    const apiKey = await this.prisma.apiKey.findUnique({ where: { id }, omit: { keyHash: false } });
     if (!apiKey) {
       throw new NotFoundException('API Key not found');
     }
@@ -77,12 +77,14 @@ export class ApiKeysService {
   ) {
     const updated = await this.prisma.apiKey.update({
       where: { id },
+      omit: { keyHash: false },
       data: {
         monthlyLimit: dto.monthlyLimit,
         rateLimitPerMinute: dto.rateLimitPerMinute,
       },
     });
-    await this.redis.del(`api-key:${updated.keyHash}`);
-    return updated;
+    const { keyHash, ...rest } = updated;
+    await this.redis.del(`api-key:${keyHash}`);
+    return rest;
   }
 }

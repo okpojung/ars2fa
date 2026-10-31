@@ -22,7 +22,7 @@ export function LoginPage({ admin = false }: { admin?: boolean }) {
         ? { ...data.admin, kind: 'admin' as const }
         : { ...data.user!, kind: 'user' as const };
       setSession(data.accessToken, principal);
-      navigate(admin ? '/admin' : '/');
+      navigate(admin ? '/admin' : '/console');
     } catch (error) {
       message.error(error instanceof Error ? error.message : '로그인 실패');
     }

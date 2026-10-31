@@ -183,6 +183,8 @@ model ApplicationApp {
   // Name read out / shown to the end user (phishing notice). Falls back to mobileAppName.
   displayName    String?
   integrityPolicy IntegrityPolicy @default(MONITOR)
+  // APP mode: caller must press 1 after the notice. null = system default (ARS settings). Set by the customer.
+  confirmKeyRequired Boolean?
   // Android: SHA-256 of the signing certificate as reported by Play Integrity (base64url, comma separated)
   androidCertSha256 String?
   // iOS: Apple developer Team ID used in the App Attest App ID (teamId.bundleId)
@@ -388,6 +390,7 @@ model ArsSession {
   dialToken          String?          @unique // PC mode: one-time token of the mobile dial page (QR)
   codeExpiresAt      DateTime?        // PC mode: deadline for keying in the code
   pcCodeAttempts     Int              @default(0)
+  confirmKey         Boolean          @default(true) // APP mode: press-1 required (app setting or system default at creation)
   integrityVerdict   IntegrityVerdict @default(NOT_PROVIDED)
   integrityDetail    Json?
   pbxUniqueId        String?

@@ -10,7 +10,7 @@ import { isHiddenCaller, isKrMobile, maskPhone, normalizeKrPhone, openText, phon
 import { VerifiedClient } from './api-key-auth.service';
 
 /** Result line returned to the PBX dialplan. */
-export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: string; sessionId?: string; mode?: 'APP' | 'PC'; digits?: number; readTimeout?: number };
+export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: string; sessionId?: string; mode?: 'APP' | 'PC'; digits?: number; readTimeout?: number; confirm?: boolean };
 
 /** Time slack between Daou's callStartTime and our INVITE time (measured INVITE->AuthLog 1-2 s). */
 const AUTHLOG_BEFORE_MS = 20_000;
@@ -26,6 +26,7 @@ const LINK_ATTEMPTS = 3;
 export type CreateSessionResult = {
   session_id: string; status: string; mode: ArsSessionMode; dial_number?: string; dial_uri?: string; dial_page_url?: string;
   expires_at: string; expires_in: number; display_name: string; integrity: string; notice: string; server_time: string;
+  confirm_key?: boolean; // APP: caller will be asked to press 1 after the notice
 };
 export type DialPageInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string; server_time?: string };
 
@@ -113,7 +114,10 @@ export class ArsSessionService {
         sessionId, apiKeyId: client.apiKeyId, applicationAppId: client.app.id, mobileAppName: client.app.mobileAppName,
         displayName: client.app.displayName || client.app.mobileAppName, clientPlatform: client.app.platform, mode,
         appsid: body.appsid?.slice(0, 100), purpose: body.purpose ?? null, vnId: leased.vnId, vn: leased.vn, rn: leased.rn,
-        expectedPhoneHash: expectedHash, pcCode, dialToken, integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
+        expectedPhoneHash: expectedHash, pcCode, dialToken,
+        // press-1 after the notice: the customer's per-app choice, otherwise the system default
+        confirmKey: mode === 'APP' ? (client.app.confirmKeyRequired ?? s.confirmKeyRequired) : false,
+        integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
       },
     });
     await this.event(session.id, 'SESSION_CREATED', { mode, cycle: leased.cycleNo, position: leased.position, routing: leased.routing, integrity: integrity.verdict });
@@ -125,6 +129,7 @@ export class ArsSessionService {
       mode,
       // APP: the app dials this itself; it must not be printed on screen (see SDK guide).
       // PC: the number is never given to the PC; the QR carries dial_page_url, a one-time mobile page with a call button.
+      ...(mode === 'APP' ? { confirm_key: session.confirmKey } : {}),
       ...(mode === 'PC' ? { dial_page_url: `${base}/m/ars/${dialToken}` } : { dial_number: dial, dial_uri: `tel:${dial}` }),
       expires_at: expiresAt.toISOString(),
       expires_in: ttl,
@@ -294,7 +299,7 @@ export class ArsSessionService {
     }
     if (phase === 'connect') return done(await this.connectChecks(session, log, { callerHash, caller, uniqueId: call.uniqueId }, s));
     if (session.mode === 'PC') return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
-    if (s.confirmKeyRequired && input.confirmKey !== '1') {
+    if (session.confirmKey && input.confirmKey !== '1') {
       await this.finish(session, 'FAILED', 'not_confirmed', { callerHash, caller, uniqueId: call.uniqueId, logId: log.id, at: log.callStartAt });
       return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
     }
@@ -336,7 +341,7 @@ export class ArsSessionService {
       // Read() waits this long after the guidance prompt (digits can also be keyed in during the prompt)
       return { result: 'OK', mode: 'PC', digits: session.pcCode.length, readTimeout: Math.max(5, s.pcCodeSeconds - PC_GUIDE_SECONDS), sessionId: session.sessionId };
     }
-    return { result: 'OK', mode: 'APP', sessionId: session.sessionId };
+    return { result: 'OK', mode: 'APP', confirm: session.confirmKey, sessionId: session.sessionId };
   }
 
   /** PC mode: digits keyed in on the phone (DTMF) for the code shown on the PC. One try, within pcCodeSeconds. */

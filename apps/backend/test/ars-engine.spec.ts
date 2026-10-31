@@ -10,7 +10,8 @@ import { CarrierRequest, CarrierService } from '../src/modules/ars-engine/carrie
 import { PlayIntegrityVerifier } from '../src/modules/ars-engine/integrity/play-integrity';
 import { decodeCbor } from '../src/modules/ars-engine/integrity/cbor';
 import { isHiddenCaller, normalizeKrPhone, openText, sealText } from '../src/modules/ars-engine/phone.util';
-import { kst, LINES, numbers, resetDb, seedClient } from './helpers';
+import { kst, LINES, numbers, resetDb, seedClient, TEST_KEY } from './helpers';
+import { hmacSha256 } from '../src/common/crypto.util';
 
 const prisma = new PrismaService();
 const redis = new RedisService();
@@ -42,6 +43,13 @@ async function setup(n = 30, opts: Parameters<typeof seedClient>[1] = {}) {
   return { ...c, client };
 }
 
+/** Identity for an existing app with a fresh API key of its application (bypasses the redis key cache). */
+async function seedIdentity(appId: string) {
+  const app = await prisma.applicationApp.findUniqueOrThrow({ where: { id: appId } });
+  const key = `${TEST_KEY}${Math.random().toString(36).slice(2, 8)}`;
+  await prisma.apiKey.create({ data: { applicationId: app.applicationId, keyPrefix: key.slice(0, 14), keyHash: hmacSha256(process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret', key), status: 'ACTIVE', monthlyLimit: 10000, rateLimitPerMinute: 1000 } });
+  return { api_key: key, mobile_app_name: app.mobileAppName, client_platform: app.platform as 'ANDROID' | 'IOS', package_name: app.packageName ?? undefined, bundle_id: app.bundleId ?? undefined };
+}
 async function vnOf(sessionId: string) {
   return prisma.arsSession.findUniqueOrThrow({ where: { sessionId } });
 }
@@ -264,6 +272,22 @@ describe('call verification', () => {
     expect(await sessions.status(client, r4.session_id)).toMatchObject({ status: 'FAILED', fail_reason: 'code_timeout' });
   });
 
+  test('per-app setting: press-1 off -> connect says confirm=false and the call verifies without a key', async () => {
+    const { client, app } = await setup();
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: false } });
+    void client;
+    const c2 = await auth.verify(await seedIdentity(app.id));
+    const r = await sessions.create(c2, {});
+    const s = await vnOf(r.session_id);
+    expect(s.confirmKey).toBe(false);
+    await carrierLog(s.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'nc1', t0: new Date(), phase: 'connect' })).toMatchObject({ result: 'OK', mode: 'APP', confirm: false });
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'nc1', t0: new Date(), confirmKey: '' })).toMatchObject({ result: 'OK' });
+    // back to the system default (on): a new session needs the key again
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: null } });
+    const r2 = await sessions.create(await auth.verify(await seedIdentity(app.id)), {});
+    expect((await vnOf(r2.session_id)).confirmKey).toBe(true);
+  });
   test('PC mode: a different phone than the one typed on the PC fails at connect', async () => {
     const { client } = await setup();
     const r = await sessions.create(client, { mode: 'PC', expected_phone: '01011112222' });

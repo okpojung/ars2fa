@@ -13,7 +13,9 @@ export class PrismaService
         process.env.DATABASE_URL ??
         'postgresql://ars2fa:ars2fa@localhost:5432/ars2fa?schema=public',
     });
-    super({ adapter });
+    // Secrets are never read unless a query asks for them explicitly (omit: { field: false }):
+    // responses that include users or API keys can then never leak password or key hashes.
+    super({ adapter, omit: { user: { passwordHash: true }, adminUser: { passwordHash: true }, apiKey: { keyHash: true } } });
   }
 
   async onModuleInit() {

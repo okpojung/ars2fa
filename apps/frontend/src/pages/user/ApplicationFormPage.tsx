@@ -32,7 +32,7 @@ export function ApplicationFormPage() {
       });
       await apiClient.post(`/applications/${data.id}/submit`);
       message.success('API 신청이 제출되었습니다.');
-      navigate('/applications');
+      navigate('/console/applications');
     } catch (error) {
       message.error(error instanceof Error ? error.message : '신청 실패');
     }

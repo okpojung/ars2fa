@@ -44,6 +44,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
+      omit: { passwordHash: false },
       where: { email: dto.email },
     });
     if (!user || !(await compare(dto.password, user.passwordHash))) {
@@ -71,6 +72,7 @@ export class AuthService {
 
   async adminLogin(dto: LoginDto) {
     const admin = await this.prisma.adminUser.findUnique({
+      omit: { passwordHash: false },
       where: { email: dto.email },
     });
     if (!admin || !(await compare(dto.password, admin.passwordHash))) {

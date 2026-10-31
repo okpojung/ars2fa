@@ -124,7 +124,7 @@ export class ArsInternalController {
     const t0 = dto.t0 ? new Date(Number(dto.t0) * 1000) : new Date();
     const v = await this.sessions.verifyCall({ rn: dto.rn, caller: dto.caller ?? '', uniqueId: dto.uid,
       t0: Math.abs(t0.getTime() - Date.now()) < 600_000 ? t0 : new Date(), phase: 'connect' });
-    res.type('text/plain').send(v.result !== 'OK' ? `FAIL:${v.reason}` : v.mode === 'PC' ? `PC:${v.digits}:${v.readTimeout}` : 'APP');
+    res.type('text/plain').send(v.result !== 'OK' ? `FAIL:${v.reason}` : v.mode === 'PC' ? `PC:${v.digits}:${v.readTimeout}` : v.confirm === false ? 'APPN' : 'APP');
   }
 
   /** PC mode: the digits the caller keyed in. "OK" or "FAIL:<reason>". */
