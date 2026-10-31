@@ -3,15 +3,24 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
 import { AuthService } from './auth.service';
+import { TurnstileService } from './turnstile.service';
+import { getClientIp } from '../../common/request.util';
 import { LoginDto, SignupDto } from './auth.dto';
 
 @ApiTags('auth')
 @Controller('api')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService, private readonly turnstile: TurnstileService) {}
+
+  /** Public settings for the sign-up page (Turnstile site key, null when bot protection is off). */
+  @Get('auth/config')
+  config() {
+    return { turnstileSiteKey: this.turnstile.siteKey };
+  }
 
   @Post('auth/signup')
-  signup(@Body() dto: SignupDto) {
+  async signup(@Body() dto: SignupDto, @Req() req: Request) {
+    await this.turnstile.verify(dto.turnstileToken, getClientIp(req));
     return this.authService.signup(dto);
   }
 

@@ -25,6 +25,11 @@ export class SignupDto {
   @IsString()
   @IsNotEmpty()
   contactPhone!: string;
+
+  /** Cloudflare Turnstile token from the sign-up page (required when TURNSTILE_SECRET is configured). */
+  @IsOptional()
+  @IsString()
+  turnstileToken?: string;
 }
 
 export class LoginDto {

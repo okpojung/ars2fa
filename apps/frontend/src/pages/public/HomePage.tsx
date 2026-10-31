@@ -88,7 +88,10 @@ export function HomePage() {
 
       <footer className="site-footer">
         <div className="site-wrap">
-          <div>ARS2FA · (주)바로서비스</div>
+          <div>
+            <b>ARS2FA</b> · (주)이지트론<br />
+            문의 <a href="tel:0507-0090-1105">0507-0090-1105</a> · <a href="mailto:baro@baro.me">baro@baro.me</a>
+          </div>
           <div><Link to="/docs">개발자 가이드</Link> · <Link to="/login">고객 로그인</Link></div>
         </div>
       </footer>

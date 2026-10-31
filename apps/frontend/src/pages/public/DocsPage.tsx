@@ -157,6 +157,12 @@ export function DocsPage() {
           <li>앱 위조 방지: Play Integrity(Android) / App Attest(iOS) 토큰을 함께 보내면 정품 앱만 허용할 수 있습니다 (<code>/v1/ars/integrity/challenge</code>).</li>
         </ul>
       </article>
+      <footer className="site-footer">
+        <div className="site-wrap">
+          <div><b>ARS2FA</b> · (주)이지트론 · 문의 <a href="tel:0507-0090-1105">0507-0090-1105</a> · <a href="mailto:baro@baro.me">baro@baro.me</a></div>
+          <div><Link to="/">서비스 소개</Link> · <Link to="/login">고객 로그인</Link></div>
+        </div>
+      </footer>
     </div>
   );
 }
