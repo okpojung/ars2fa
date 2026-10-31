@@ -6,17 +6,22 @@ import { FAIL_REASON_LABEL } from './AdminDashboardPage';
 
 const PREFIXES = ['010', '011', '016', '017', '018', '019'];
 
-/** Seconds left until an ISO time, updated 4x a second. */
-function useSecondsLeft(iso?: string | null) {
+/** Seconds left until an ISO time on the server clock (offsetMs = server - this device), updated 4x a second. */
+export function useSecondsLeft(iso?: string | null, offsetMs = 0) {
   const [left, setLeft] = useState<number | null>(null);
   useEffect(() => {
     if (!iso) { setLeft(null); return; }
-    const tick = () => setLeft(Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 1000)));
+    const tick = () => setLeft(Math.max(0, Math.floor((new Date(iso).getTime() - (Date.now() + offsetMs)) / 1000)));
     tick();
     const t = setInterval(tick, 250);
     return () => clearInterval(t);
-  }, [iso]);
+  }, [iso, offsetMs]);
   return left;
+}
+
+/** server - device clock difference from a response's server_time (taken when the response arrived). */
+export function clockOffset(serverTime?: string | null) {
+  return serverTime ? new Date(serverTime).getTime() - Date.now() : 0;
 }
 
 export function AdminArsTestPage() {
@@ -25,25 +30,30 @@ export function AdminArsTestPage() {
   const [prefix, setPrefix] = useState('010');
   const [rest, setRest] = useState('');
   const [session, setSession] = useState<Record<string, any> | null>(null);
+  const [offset, setOffset] = useState(0);
 
   const phoneOk = /^[0-9]{7,8}$/.test(rest);
   const create = useMutation({
     mutationFn: async () => (await apiClient.post('/admin/ars/test/sessions', {
       mode, country_code: cc, expected_phone: mode === 'PC' || rest ? `${prefix}${rest}` : undefined,
     })).data,
-    onSuccess: setSession,
+    onSuccess: (d) => { setOffset(clockOffset(d.server_time)); setSession(d); },
     onError: (e) => message.error((e as Error).message),
   });
   const status = useQuery({
     queryKey: ['ars-test', session?.session_id],
     enabled: !!session,
-    queryFn: async () => (await apiClient.get(`/admin/ars/test/sessions/${session!.session_id}`)).data,
+    queryFn: async () => {
+      const d = (await apiClient.get(`/admin/ars/test/sessions/${session!.session_id}`)).data;
+      setOffset(clockOffset(d.server_time));
+      return d;
+    },
     refetchInterval: (q) => (['PENDING', 'CALL_CONFIRMED'].includes(q.state.data?.status ?? 'PENDING') ? 1000 : false),
   });
   const st = status.data?.status ?? session?.status;
-  const callLeft = useSecondsLeft(st === 'PENDING' ? session?.expires_at : null);
-  const codeLeft = useSecondsLeft(st === 'CALL_CONFIRMED' ? status.data?.code_expires_at : null);
-  const codeTotal = status.data?.code_seconds ?? 20;
+  const callLeft = useSecondsLeft(st === 'PENDING' ? session?.expires_at : null, offset);
+  const codeLeft = useSecondsLeft(st === 'CALL_CONFIRMED' ? status.data?.code_expires_at : null, offset);
+  const codeTotal = status.data?.code_seconds ?? 15;
 
   return (
     <>

@@ -25,9 +25,9 @@ const LINK_ATTEMPTS = 3;
 /** POST /v1/ars/sessions response. APP: dial_number/dial_uri (dialled by the app, never shown). PC: dial_page_url (QR). */
 export type CreateSessionResult = {
   session_id: string; status: string; mode: ArsSessionMode; dial_number?: string; dial_uri?: string; dial_page_url?: string;
-  expires_at: string; expires_in: number; display_name: string; integrity: string; notice: string;
+  expires_at: string; expires_in: number; display_name: string; integrity: string; notice: string; server_time: string;
 };
-export type DialPageInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string };
+export type DialPageInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string; server_time?: string };
 
 export const FAIL_REASONS = [
   'hidden_caller', 'not_mobile', 'not_confirmed', 'no_authlog', 'no_session', 'multiple_calls',
@@ -35,7 +35,7 @@ export const FAIL_REASONS = [
 ] as const;
 
 /** Length of the ARS guidance played (as Read prompt) before/while the caller keys in the PC code. */
-const PC_GUIDE_SECONDS = 5;
+const PC_GUIDE_SECONDS = 6;
 
 @Injectable()
 export class ArsSessionService {
@@ -131,6 +131,8 @@ export class ArsSessionService {
       display_name: session.displayName,
       integrity: integrity.verdict,
       notice: `${session.displayName} 인증 전화입니다. 본인이 요청하지 않았다면 전화를 끊으세요.`,
+      // clients count down against server time (device clocks differ by seconds)
+      server_time: new Date().toISOString(),
     };
   }
 
@@ -146,6 +148,7 @@ export class ArsSessionService {
       expires_at: s.expiresAt.toISOString(), finished_at: s.finishedAt?.toISOString() ?? null,
       phone_masked: s.callerPhoneMasked, integrity: s.integrityVerdict,
       pc_code_required: s.status === 'CALL_CONFIRMED',
+      server_time: new Date().toISOString(),
     };
     // PC mode: once the call is connected the PC shows the code to key in on the phone, with its deadline
     if (s.mode === 'PC' && s.status === 'CALL_CONFIRMED') Object.assign(out, { pc_code: s.pcCode, code_expires_at: s.codeExpiresAt?.toISOString() ?? null, code_seconds: (await this.settings.get()).pcCodeSeconds });
@@ -163,10 +166,10 @@ export class ArsSessionService {
   /** Mobile dial page (QR, PC mode): call button while the window is open. Public, addressed by an unguessable one-time token. */
   async dialPage(token: string): Promise<DialPageInfo> {
     const s = token && /^[A-Za-z0-9_-]{20,40}$/.test(token) ? await this.prisma.arsSession.findUnique({ where: { dialToken: token } }) : null;
-    if (!s) return { state: 'NOT_FOUND' };
+    if (!s) return { state: 'NOT_FOUND', server_time: new Date().toISOString() };
     const open = s.status === 'PENDING' && s.expiresAt.getTime() > this.now().getTime();
     const state: DialPageInfo['state'] = open ? 'READY' : s.status === 'CALL_CONFIRMED' ? 'CONNECTED' : s.status === 'VERIFIED' ? 'DONE' : s.status === 'PENDING' ? 'EXPIRED' : 'CLOSED';
-    return { state, display_name: s.displayName, expires_at: s.expiresAt.toISOString(), ...(open ? { tel: `tel:${this.dialString(s.vn)}` } : {}) };
+    return { state, display_name: s.displayName, expires_at: s.expiresAt.toISOString(), server_time: new Date().toISOString(), ...(open ? { tel: `tel:${this.dialString(s.vn)}` } : {}) };
   }
   private async find(client: VerifiedClient, sessionId: string) {
     const s = await this.prisma.arsSession.findUnique({ where: { sessionId } });

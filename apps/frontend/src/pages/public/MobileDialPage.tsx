@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-type DialInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string };
+type DialInfo = { state: 'READY' | 'CONNECTED' | 'DONE' | 'EXPIRED' | 'CLOSED' | 'NOT_FOUND'; display_name?: string; expires_at?: string; tel?: string; server_time?: string };
 
 /**
  * Opened on the phone from the PC-mode QR code. Shows what this is and a call button; the 0507 number itself is
@@ -11,6 +11,7 @@ export function MobileDialPage() {
   const { token } = useParams();
   const [info, setInfo] = useState<DialInfo | null>(null);
   const [left, setLeft] = useState<number | null>(null);
+  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
     let stop = false;
@@ -18,7 +19,7 @@ export function MobileDialPage() {
       try {
         const r = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? '/api'}/public/ars/dial/${encodeURIComponent(token ?? '')}`);
         const j = (await r.json()) as DialInfo;
-        if (!stop) setInfo(j);
+        if (!stop) { if (j.server_time) setOffset(new Date(j.server_time).getTime() - Date.now()); setInfo(j); }
       } catch {
         if (!stop) setInfo({ state: 'NOT_FOUND' });
       }
@@ -30,11 +31,12 @@ export function MobileDialPage() {
 
   useEffect(() => {
     if (!info?.expires_at || info.state !== 'READY') { setLeft(null); return; }
-    const tick = () => setLeft(Math.max(0, Math.ceil((new Date(info.expires_at!).getTime() - Date.now()) / 1000)));
+    // server clock, so the phone and the PC show the same seconds
+    const tick = () => setLeft(Math.max(0, Math.floor((new Date(info.expires_at!).getTime() - (Date.now() + offset)) / 1000)));
     tick();
     const t = setInterval(tick, 250);
     return () => clearInterval(t);
-  }, [info]);
+  }, [info, offset]);
 
   const ready = info?.state === 'READY' && (left ?? 1) > 0;
   const box: React.CSSProperties = { maxWidth: 480, margin: '0 auto', padding: '32px 20px', fontFamily: 'system-ui, -apple-system, "Malgun Gothic", sans-serif', color: '#1f1f1f' };

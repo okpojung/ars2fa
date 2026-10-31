@@ -212,7 +212,7 @@ describe('call verification', () => {
     const page = await sessions.dialPage(token);
     expect(page).toMatchObject({ state: 'READY' });
     expect(page.tel).toMatch(/^tel:0507-0095-2\d{3}$/);
-    expect(await sessions.dialPage('x'.repeat(24))).toEqual({ state: 'NOT_FOUND' });
+    expect(await sessions.dialPage('x'.repeat(24))).toMatchObject({ state: 'NOT_FOUND' });
     expect((await sessions.status(client, r.session_id))).not.toHaveProperty('pc_code');
 
     let s = await vnOf(r.session_id);
@@ -220,9 +220,10 @@ describe('call verification', () => {
     const c1 = await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'p1', t0: new Date(), phase: 'connect' });
     expect(c1).toMatchObject({ result: 'OK', mode: 'PC', digits: 4 });
     const st = await sessions.status(client, r.session_id);
-    expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 20 });
+    expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 15 });
     expect(st.pc_code).toMatch(/^[0-9]{4}$/);
-    expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 15_000);
+    expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 12_000);
+    expect(c1.readTimeout).toBe(9); // 15 s minus the 6 s guidance prompt
     // forwarding switched back as soon as the call is connected (immediate carrier call, no sweeper needed)
     await new Promise((res) => setTimeout(res, 300));
     expect(carrierCalls).toContainEqual({ vn: s.vn, rn: s.rn, link: false });

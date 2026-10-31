@@ -114,7 +114,27 @@ export class ArsInternalController {
   }
 
   /**
-   * Right after answering: 
+   * Right after answering: "APP" (play notice + confirm key, then pbx/verify), "PC:<digits>:<readTimeout>"
+   * (play guidance and read the code shown on the PC, then pbx/code) or "FAIL:<reason>".
+   */
+  @Post('pbx/connect')
+  @HttpCode(200)
+  async connect(@Body() dto: PbxVerifyDto & { key?: string }, @Req() req: Request, @Res() res: Response) {
+    this.guard(req);
+    const t0 = dto.t0 ? new Date(Number(dto.t0) * 1000) : new Date();
+    const v = await this.sessions.verifyCall({ rn: dto.rn, caller: dto.caller ?? '', uniqueId: dto.uid,
+      t0: Math.abs(t0.getTime() - Date.now()) < 600_000 ? t0 : new Date(), phase: 'connect' });
+    res.type('text/plain').send(v.result !== 'OK' ? `FAIL:${v.reason}` : v.mode === 'PC' ? `PC:${v.digits}:${v.readTimeout}` : 'APP');
+  }
+
+  /** PC mode: the digits the caller keyed in. "OK" or "FAIL:<reason>". */
+  @Post('pbx/code')
+  @HttpCode(200)
+  async code(@Body() dto: PbxCodeDto, @Req() req: Request, @Res() res: Response) {
+    this.guard(req);
+    const v = await this.sessions.submitPhoneCode(dto.uid, dto.code ?? '');
+    res.type('text/plain').send(v.result === 'OK' ? 'OK' : `FAIL:${v.reason}`);
+  }
 
   /** Hangup notice from the dialplan (h extension): switch the number's forwarding off now. */
   @Post('pbx/hangup')
