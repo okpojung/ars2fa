@@ -22,6 +22,12 @@
 - 종료된 번호는 `cooldownSeconds` 동안 휴식.
 - SKB는 Request-URI에 대표번호(070-7875-4442)를, **To 헤더에 실제 착신 070**을 넣는다. 다이얼플랜은 To로 `rn`을 구한다.
 
+## 2-1. SKB 수신 실측 (2026-10-31)
+
+- Request-URI: 대표번호 070-7875-4442, `To`: 실제 착신 070(예: 070-5190-1900)
+- 발신번호: `CALLERID(num)`과 `P-Asserted-Identity`는 비어 있고 **`From` 헤더에만** 휴대폰 번호가 온다. 다이얼플랜은 num → PAI → From 순으로 읽는다(`deploy/asterisk/from-skb.conf`).
+- 첫 실통화 성공: 발신 후 다우 AuthLog 2초 만에 도착, 1번 입력 후 판정 OK, PC 확인 숫자 입력으로 VERIFIED.
+
 ## 3. 판정 (PBX → `POST /internal/pbx/verify`)
 
 1. 발신번호 표시·휴대폰 여부
