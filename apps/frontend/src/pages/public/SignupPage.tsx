@@ -25,7 +25,8 @@ export function SignupPage() {
           <Form.Item name="email" label="이메일" rules={[{ required: true, type: 'email' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="password" label="비밀번호" rules={[{ required: true, min: 10 }]}>
+          <Form.Item name="password" label="비밀번호" rules={[{ required: true, message: '비밀번호를 입력하세요.' }, { pattern: /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S{8,64}$/, message: '8자 이상, 영문·숫자·특수문자를 모두 포함하세요.' }]}
+            extra="8자 이상, 영문 + 숫자 + 특수문자 조합">
             <Input.Password />
           </Form.Item>
           <Form.Item name="companyName" label="회사명" rules={[{ required: true }]}>
