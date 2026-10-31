@@ -13,7 +13,7 @@ import { ApiKeyAuthService, ClientIdentity } from './api-key-auth.service';
 import { ArsSessionService } from './ars-session.service';
 import { ArsSettingsService } from './ars-settings.service';
 import {
-  AppSecurityDto, ArsSettingsDto, AttestRegisterDto, AuthLogDto, ClientDto, CreateSessionDto, ImportPoolDto, PbxVerifyDto, PcCodeDto,
+  AppSecurityDto, ArsSettingsDto, AttestRegisterDto, AuthLogDto, ClientDto, CreateSessionDto, ImportPoolDto, PbxHangupDto, PbxPrecheckDto, PbxVerifyDto, PcCodeDto,
   SessionRefDto, VnStatusDto,
 } from './ars-engine.dto';
 import { IntegrityService } from './integrity/integrity.service';
@@ -102,6 +102,23 @@ export class ArsInternalController {
     res.type('text/plain').send(v.result === 'OK' ? (v.pcCode ? `OK:${v.pcCode}` : 'OK') : `FAIL:${v.reason}`);
   }
 
+  /** "OK" if an authentication is waiting for a call on this 070, otherwise "NO" (PBX plays the invalid-access message). */
+  @Post('pbx/precheck')
+  @HttpCode(200)
+  async precheck(@Body() dto: PbxPrecheckDto, @Req() req: Request, @Res() res: Response) {
+    this.guard(req);
+    res.type('text/plain').send((await this.sessions.precheck(dto.rn)) ? 'OK' : 'NO');
+  }
+
+  /** Hangup notice from the dialplan (h extension): switch the number's forwarding off now. */
+  @Post('pbx/hangup')
+  @HttpCode(200)
+  async hangup(@Body() dto: PbxHangupDto, @Req() req: Request, @Res() res: Response) {
+    this.guard(req);
+    await this.sessions.callEnded(dto.uid);
+    res.type('text/plain').send('OK');
+  }
+
   @Post('authlog')
   @HttpCode(200)
   async authlog(@Body() dto: AuthLogDto & { key?: string }, @Req() req: Request) {
@@ -138,8 +155,29 @@ export class ArsAdminController {
 
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Patch('pool/:id')
-  setStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: VnStatusDto, @Req() req: AuthenticatedRequest) {
-    return this.pool.setStatus(id, dto.status, req.user!.id);
+  async setStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: VnStatusDto, @Req() req: AuthenticatedRequest) {
+    if (dto.routing) {
+      const r = await this.prisma.virtualNumber.update({ where: { id }, data: { routing: dto.routing } });
+      await this.prisma.auditLog.create({ data: { actorType: 'ADMIN', actorId: req.user!.id, action: `VN_ROUTING_${dto.routing}`, targetType: 'VIRTUAL_NUMBER', targetId: String(id), details: { vn: r.vn } } });
+    }
+    return dto.status ? this.pool.setStatus(id, dto.status, req.user!.id) : this.prisma.virtualNumber.findUniqueOrThrow({ where: { id } });
+  }
+
+  /** Switch a number's CallMix forwarding off right away (also clears a stuck UNKNOWN state once it succeeds). */
+  @Roles('OPERATOR', 'SUPER_ADMIN')
+  @Post('pool/:id/unlink')
+  async forceUnlink(@Param('id', ParseIntPipe) id: number, @Req() req: AuthenticatedRequest) {
+    const cur = await this.prisma.virtualNumber.findUniqueOrThrow({ where: { id } });
+    if (cur.routing !== 'DYNAMIC') throw new ForbiddenException('STATIC_NUMBER');
+    const n = await this.prisma.virtualNumber.update({ where: { id }, data: { linkState: 'UNKNOWN', unlinkAfter: new Date() } });
+    await this.prisma.auditLog.create({ data: { actorType: 'ADMIN', actorId: req.user!.id, action: 'VN_FORCE_UNLINK', targetType: 'VIRTUAL_NUMBER', targetId: String(id), details: { vn: n.vn } } });
+    return { ok: true };
+  }
+
+  @Roles('OPERATOR', 'SUPER_ADMIN')
+  @Get('carrier/calls')
+  carrierCalls(@Query('take') take?: string, @Query('failed') failed?: string) {
+    return this.prisma.carrierCall.findMany({ where: failed === '1' ? { ok: false } : {}, orderBy: { createdAt: 'desc' }, take: Math.min(Number(take ?? 100), 500) });
   }
 
   @Roles('OPERATOR', 'SUPER_ADMIN')

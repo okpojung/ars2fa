@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { ArsSession, ArsSessionMode, ArsSessionStatus, Prisma } from '@prisma/client';
 import { randomBytes, randomInt } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ArsSettingsService } from './ars-settings.service';
 import { IntegrityInput, IntegrityService } from './integrity/integrity.service';
-import { NumberPoolService } from './number-pool.service';
+import { LeasedNumber, NumberPoolService } from './number-pool.service';
+import { CarrierService } from './carrier.service';
 import { isHiddenCaller, isKrMobile, maskPhone, normalizeKrPhone, openText, phoneHash, sealText, valueHash } from './phone.util';
 import { VerifiedClient } from './api-key-auth.service';
 
@@ -14,6 +15,12 @@ export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: stri
 /** Time slack between Daou's callStartTime and our INVITE time (measured INVITE->AuthLog 1-2 s). */
 const AUTHLOG_BEFORE_MS = 20_000;
 const AUTHLOG_AFTER_MS = 10_000;
+/** A call placed just before the window closes is still being handled (notice, press 1) this long after it. */
+export const CALL_GRACE_MS = 20_000;
+/** While a call is in progress the forwarding stays on at most this long (the PBX hangup notice usually ends it sooner). */
+export const IN_CALL_UNLINK_MS = 20_000;
+/** How many numbers to try when CallMix refuses to switch one on. */
+const LINK_ATTEMPTS = 3;
 
 export const FAIL_REASONS = [
   'hidden_caller', 'not_mobile', 'not_confirmed', 'no_authlog', 'no_session', 'multiple_calls',
@@ -30,7 +37,35 @@ export class ArsSessionService {
     private readonly pool: NumberPoolService,
     private readonly settings: ArsSettingsService,
     private readonly integrity: IntegrityService,
+    private readonly carrier: CarrierService,
   ) {}
+
+  /**
+   * Leases the next number of the random cycle and, for DYNAMIC numbers, switches its CallMix forwarding on.
+   * The number is handed out only after the carrier confirmed; refused numbers rest and the next one is tried.
+   */
+  private async leaseAndLink(ttlSeconds: number, cooldownSeconds: number): Promise<{ leased: LeasedNumber; expiresAt: Date }> {
+    let lastError = '';
+    for (let i = 0; i < LINK_ATTEMPTS; i++) {
+      const t = this.now();
+      const leased = await this.pool.lease(new Date(t.getTime() + (ttlSeconds + 60) * 1000), t, { dynamic: this.carrier.enabled });
+      if (leased.routing === 'STATIC') {
+        const expiresAt = new Date(this.now().getTime() + ttlSeconds * 1000);
+        return { leased, expiresAt };
+      }
+      const r = await this.carrier.set(leased.vnId, leased.vn, leased.rn, true);
+      if (r.ok) {
+        // the call window starts when the forwarding is actually on
+        const now = this.now();
+        const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+        await this.pool.markLinked(leased.vnId, new Date(expiresAt.getTime() + CALL_GRACE_MS), expiresAt, now);
+        return { leased, expiresAt };
+      }
+      lastError = `${r.code} ${r.message}`;
+      await this.pool.linkFailed(leased.vnId, lastError, cooldownSeconds, this.now());
+    }
+    throw new HttpException({ code: 'CARRIER_UNAVAILABLE', message: '인증 번호를 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.' }, 503);
+  }
 
   // ---------------------------------------------------------------------------------------------
   // customer API
@@ -52,11 +87,9 @@ export class ArsSessionService {
     // App forgery check happens before a number is leased (ENFORCE refuses here).
     const integrity = await this.integrity.evaluate(client.app, client.apiKeyId, body);
 
-    const now = this.now();
     const ttl = mode === 'PC' ? s.leaseSecondsPc : s.leaseSecondsApp;
-    const expiresAt = new Date(now.getTime() + ttl * 1000);
-    // the number stays leased a little past expiry so a late call is still attributed (and rejected)
-    const leased = await this.pool.lease(new Date(expiresAt.getTime() + 15_000), now);
+    // forwarding on only for this session; switched off at expiresAt or when the call is over
+    const { leased, expiresAt } = await this.leaseAndLink(ttl, s.cooldownSeconds);
     const sessionId = `ars_${randomBytes(15).toString('base64url')}`;
     const pcCode = mode === 'PC' && s.pcCodeEnabled ? String(randomInt(10, 100)) : null;
     const session = await this.prisma.arsSession.create({
@@ -67,7 +100,7 @@ export class ArsSessionService {
         expectedPhoneHash: expectedHash, pcCode, integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
       },
     });
-    await this.event(session.id, 'SESSION_CREATED', { mode, cycle: leased.cycleNo, position: leased.position, integrity: integrity.verdict });
+    await this.event(session.id, 'SESSION_CREATED', { mode, cycle: leased.cycleNo, position: leased.position, routing: leased.routing, integrity: integrity.verdict });
     const dial = this.dialString(leased.vn);
     return {
       session_id: session.sessionId,
@@ -157,6 +190,29 @@ export class ArsSessionService {
    * 0507 that forwards to this 070, 4) that 0507 is leased to a pending session, 5) it is the only call
    * to that number in the session, 6) expected phone (if given) matches.
    */
+  /**
+   * Answered call, before the notice: is any authentication waiting for a call on this 070 right now?
+   * If not, the call is not part of an authentication and the PBX plays the "not a valid access" message.
+   */
+  async precheck(rnRaw: string): Promise<boolean> {
+    const rn = (rnRaw ?? '').replace(/\D/g, '').replace(/^82/, '0');
+    if (!rn) return false;
+    const n = await this.prisma.arsSession.count({ where: { rn, status: 'PENDING', expiresAt: { gte: new Date(this.now().getTime() - CALL_GRACE_MS) } } });
+    return n > 0;
+  }
+
+  /** PBX hangup notice: the call is over, so the forwarding of its number can be switched off now. */
+  async callEnded(uniqueId: string) {
+    const call = await this.prisma.pbxCall.findUnique({ where: { uniqueId: (uniqueId ?? '').slice(0, 64) } });
+    if (!call) return { ok: true };
+    await this.prisma.pbxCall.update({ where: { id: call.id }, data: { endedAt: this.now() } });
+    if (call.sessionId) {
+      const s = await this.prisma.arsSession.findUnique({ where: { sessionId: call.sessionId } });
+      if (s) await this.pool.scheduleUnlink(s.vnId, this.now());
+    }
+    return { ok: true };
+  }
+
   async verifyCall(input: { rn: string; caller: string; uniqueId: string; t0: Date; confirmKey?: string }): Promise<PbxVerdict> {
     const s = await this.settings.get();
     const rn = (input.rn ?? '').replace(/\D/g, '').replace(/^82/, '0');
@@ -170,6 +226,8 @@ export class ArsSessionService {
       await this.prisma.pbxCall.update({ where: { id: call.id }, data: { result: v.result, reason: v.reason ?? null, sessionId: v.sessionId ?? null } });
       return v;
     };
+    // once a call for a session has been decided, its number stops taking calls shortly after (or at hangup)
+    const stopSoon = (vnId: number) => this.pool.scheduleUnlink(vnId, new Date(this.now().getTime() + IN_CALL_UNLINK_MS));
     if (isHiddenCaller(input.caller) || !caller) return done({ result: 'FAIL', reason: 'hidden_caller' });
     if (s.mobileOnly && !isKrMobile(caller)) return done({ result: 'FAIL', reason: 'not_mobile' });
 
@@ -201,6 +259,7 @@ export class ArsSessionService {
     });
     if (!session) return done({ result: 'FAIL', reason: 'no_session' });
     if (session.rn !== rn) return done({ result: 'FAIL', reason: 'pool_mismatch', sessionId: session.sessionId });
+    await stopSoon(session.vnId);
     if (session.status !== 'PENDING') {
       // a second call to an already decided session: never changes the outcome
       await this.event(session.id, 'EXTRA_CALL_REJECTED', { callerMasked: maskPhone(caller) });
@@ -222,7 +281,8 @@ export class ArsSessionService {
     }
     const callData = { callerHash, caller, uniqueId: call.uniqueId, logId: log.id, at: log.callStartAt };
     if (session.mode === 'PC' && session.pcCode) {
-      const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData);
+      // the user now has pcCodeSeconds to type the digits on the PC (the number itself is switched off)
+      const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData, new Date(this.now().getTime() + s.pcCodeSeconds * 1000));
       if (!moved) return done({ result: 'FAIL', reason: 'second_call', sessionId: session.sessionId });
       return done({ result: 'OK', pcCode: session.pcCode, sessionId: session.sessionId });
     }
@@ -237,8 +297,10 @@ export class ArsSessionService {
   private async transition(
     s: Pick<ArsSession, 'id' | 'status'>, to: ArsSessionStatus, reason: string | null,
     call?: { callerHash: string; caller: string; uniqueId: string; logId: string; at: Date },
+    expiresAt?: Date,
   ): Promise<boolean> {
     const data: Prisma.ArsSessionUpdateManyMutationInput = { status: to, failReason: reason };
+    if (expiresAt) data.expiresAt = expiresAt;
     if (call) Object.assign(data, { callerPhoneHash: call.callerHash, callerPhoneMasked: maskPhone(call.caller), callerPhoneEnc: sealText(call.caller),
       pbxUniqueId: call.uniqueId, authlogEventId: call.logId, callStartedAt: call.at });
     const final = to === 'VERIFIED' || to === 'FAILED' || to === 'EXPIRED' || to === 'CANCELED';
@@ -254,12 +316,24 @@ export class ArsSessionService {
     const moved = await this.transition(s, to, reason, call);
     if (!moved) return false;
     await this.pool.release(s.vnId, (await this.settings.get()).cooldownSeconds, this.now());
+    // a call that is still connected (success/failure message, PC digits being read) gets a short grace; otherwise off now
+    let inCall = !!call;
+    if (!inCall && s.pbxUniqueId) {
+      const pc = await this.prisma.pbxCall.findUnique({ where: { uniqueId: s.pbxUniqueId } });
+      inCall = !!pc && !pc.endedAt && this.now().getTime() - pc.startedAt.getTime() < 120_000;
+    }
+    await this.pool.scheduleUnlink(s.vnId, new Date(this.now().getTime() + (inCall ? IN_CALL_UNLINK_MS : 0)));
     await this.event(s.id, `SESSION_${to}`, { reason });
     return true;
   }
 
   async expireDue(): Promise<number> {
-    const due = await this.prisma.arsSession.findMany({ where: { status: { in: ['PENDING', 'CALL_CONFIRMED'] }, expiresAt: { lt: this.now() } }, take: 500 });
+    const now = this.now();
+    // PENDING keeps a short grace so a call placed just before the window closed can still be decided
+    const due = await this.prisma.arsSession.findMany({ where: { OR: [
+      { status: 'PENDING', expiresAt: { lt: new Date(now.getTime() - CALL_GRACE_MS) } },
+      { status: 'CALL_CONFIRMED', expiresAt: { lt: now } },
+    ] }, take: 500 });
     let n = 0;
     for (const s of due) n += (await this.finish(s, 'EXPIRED', 'timeout')) ? 1 : 0;
     return n;

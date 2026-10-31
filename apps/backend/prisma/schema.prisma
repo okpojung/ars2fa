@@ -297,12 +297,46 @@ model VirtualNumber {
   cooldownUntil DateTime?
   lastUsedAt    DateTime?
   useCount      Int        @default(0)
+  routing       VnRouting  @default(DYNAMIC) // DYNAMIC: CallMix forwarding switched on per lease; STATIC: always forwarded (test numbers)
+  linkState     VnLinkState @default(OFF)  // carrier forwarding state as far as we know
+  unlinkAfter   DateTime?  // forwarding must be switched off at/after this time
+  linkChangedAt DateTime?
+  linkFailCount Int        @default(0)
+  linkError     String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   slots         VnCycleSlot[]
   sessions      ArsSession[]
 
   @@index([rn])
+  @@index([linkState, unlinkAfter])
+}
+
+enum VnRouting {
+  DYNAMIC
+  STATIC
+}
+
+enum VnLinkState {
+  OFF
+  ON
+  UNKNOWN // a link/unlink call is in flight or failed; treated as possibly on until an unlink succeeds
+}
+
+/// Every CallMix vnMapping call (forwarding on/off), for audit and latency monitoring.
+model CarrierCall {
+  id        String   @id @default(cuid())
+  vnId      Int
+  vn        String
+  action    String   // LINK | UNLINK
+  ok        Boolean
+  resCd     String
+  resMsg    String?
+  ms        Int
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([vnId, createdAt])
 }
 
 // One CSPRNG permutation of all active numbers. A new cycle is created only after every
@@ -395,6 +429,7 @@ model PbxCall {
   result       String?
   reason       String?
   sessionId    String?
+  endedAt      DateTime?
   createdAt    DateTime @default(now())
 
   @@index([rn, startedAt])

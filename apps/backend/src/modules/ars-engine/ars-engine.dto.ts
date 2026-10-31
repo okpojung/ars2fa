@@ -66,7 +66,18 @@ export class ImportPoolDto {
 }
 
 export class VnStatusDto {
-  @IsIn(['ACTIVE', 'DISABLED']) status!: 'ACTIVE' | 'DISABLED';
+  @IsOptional() @IsIn(['ACTIVE', 'DISABLED']) status?: 'ACTIVE' | 'DISABLED';
+  @IsOptional() @IsIn(['DYNAMIC', 'STATIC']) routing?: 'DYNAMIC' | 'STATIC';
+}
+
+export class PbxPrecheckDto {
+  @IsString() @MaxLength(20) rn!: string;
+  @IsOptional() @IsString() @MaxLength(200) key?: string;
+}
+
+export class PbxHangupDto {
+  @IsString() @MaxLength(64) uid!: string;
+  @IsOptional() @IsString() @MaxLength(200) key?: string;
 }
 
 export class AppSecurityDto {
@@ -79,6 +90,7 @@ export class AppSecurityDto {
 export class ArsSettingsDto {
   @IsOptional() @IsInt() leaseSecondsApp?: number;
   @IsOptional() @IsInt() leaseSecondsPc?: number;
+  @IsOptional() @IsInt() pcCodeSeconds?: number;
   @IsOptional() @IsInt() cooldownSeconds?: number;
   @IsOptional() @IsInt() authlogWaitSeconds?: number;
   @IsOptional() @IsBoolean() confirmKeyRequired?: boolean;

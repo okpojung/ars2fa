@@ -25,6 +25,11 @@ export function AdminNumberPoolPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ars-pool'] }); qc.invalidateQueries({ queryKey: ['ars-pool-summary'] }); },
     onError: (e) => message.error((e as Error).message),
   });
+  const unlink = useMutation({
+    mutationFn: (id: number) => apiClient.post(`/admin/ars/pool/${id}/unlink`),
+    onSuccess: () => { message.success('착신 해제를 요청했습니다. 몇 초 안에 반영됩니다.'); setTimeout(() => qc.invalidateQueries({ queryKey: ['ars-pool'] }), 3000); },
+    onError: (e) => message.error((e as Error).message),
+  });
   const doImport = useMutation({
     mutationFn: async () => {
       // accepts the old-new number-pool JSON ({numbers:[...]}) plus {lines:[...]} or "numbers" / "lines" text blocks
@@ -44,7 +49,8 @@ export function AdminNumberPoolPage() {
         <Col span={4}><Card><Statistic title="사용 가능" value={s?.active ?? 0} /></Card></Col>
         <Col span={4}><Card><Statistic title="인증 진행 중" value={s?.leased ?? 0} /></Card></Col>
         <Col span={4}><Card><Statistic title="휴식 중" value={s?.cooling ?? 0} /></Card></Col>
-        <Col span={8}><Card><Statistic title={`랜덤 순환 ${s?.cycle ? `${s.cycle.cycleNo}회차` : '(시작 전)'}`} value={s?.cycle ? `${s.cycle.used} / ${s.cycle.size}` : '-'} /></Card></Col>
+        <Col span={4}><Card><Statistic title="CallMix 착신 켜짐" value={s?.linkOn ?? 0} suffix={s?.linkUnknown ? <Tag color="red">확인 필요 {s.linkUnknown}</Tag> : null} /></Card></Col>
+        <Col span={4}><Card><Statistic title={`랜덤 순환 ${s?.cycle ? `${s.cycle.cycleNo}회차` : '(시작 전)'}`} value={s?.cycle ? `${s.cycle.used} / ${s.cycle.size}` : '-'} /></Card></Col>
       </Row>
       <Card style={{ marginBottom: 16 }} title="070 착신 회선 (0507 → 070 순서대로 배정)">
         <Descriptions size="small" column={5}>
@@ -66,9 +72,16 @@ export function AdminNumberPoolPage() {
           { title: '착신 070', dataIndex: 'rn', render: fmtRn },
           { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v === 'ACTIVE' ? '사용' : '중지'}</Tag> },
           { title: '인증 중', render: (_, r) => (r.leasedUntil && new Date(r.leasedUntil) > new Date() ? <Tag color="orange">임대</Tag> : r.cooldownUntil && new Date(r.cooldownUntil) > new Date() ? <Tag>휴식</Tag> : '') },
+          { title: 'CallMix 착신', render: (_, r) => r.routing === 'STATIC' ? <Tag color="blue">고정(시험)</Tag>
+            : r.linkState === 'ON' ? <Tag color="orange">켜짐</Tag>
+            : r.linkState === 'UNKNOWN' ? <Tag color="red" title={r.linkError ?? ''}>확인 필요{r.linkFailCount ? ` (실패 ${r.linkFailCount})` : ''}</Tag>
+            : <Tag>꺼짐</Tag> },
           { title: '사용 횟수', dataIndex: 'useCount' },
           { title: '최근 사용', dataIndex: 'lastUsedAt', render: (v) => (v ? new Date(v).toLocaleString('ko-KR') : '-') },
-          { title: '', render: (_, r) => <Switch checked={r.status === 'ACTIVE'} onChange={(on) => toggle.mutate({ id: r.id, status: on ? 'ACTIVE' : 'DISABLED' })} /> },
+          { title: '', render: (_, r) => <Space>
+            {r.routing === 'DYNAMIC' && r.linkState !== 'OFF' && <Button size="small" danger onClick={() => unlink.mutate(r.id)}>착신 해제</Button>}
+            <Switch checked={r.status === 'ACTIVE'} onChange={(on) => toggle.mutate({ id: r.id, status: on ? 'ACTIVE' : 'DISABLED' })} />
+          </Space> },
         ]}
       />
       <Modal open={importOpen} title="번호 가져오기" onCancel={() => setImportOpen(false)} onOk={() => doImport.mutate()} confirmLoading={doImport.isPending} width={720}>

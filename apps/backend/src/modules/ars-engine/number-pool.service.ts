@@ -4,7 +4,7 @@ import { randomInt } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type Tx = Prisma.TransactionClient;
-export type LeasedNumber = { vnId: number; vn: string; rn: string; cycleNo: number; position: number };
+export type LeasedNumber = { vnId: number; vn: string; rn: string; cycleNo: number; position: number; routing: 'DYNAMIC' | 'STATIC' };
 
 /** Advisory lock key serializing all pool mutations (allocation, cycle rollover, import). */
 const POOL_LOCK = 734001;
@@ -83,7 +83,8 @@ export class NumberPoolService {
    * passed over for now and stay unused in this cycle (taken later). A new permutation is generated
    * only after every slot of the cycle has been used.
    */
-  async lease(leaseUntil: Date, now = new Date()): Promise<LeasedNumber> {
+  async lease(leaseUntil: Date, now = new Date(), opts: { dynamic?: boolean } = {}): Promise<LeasedNumber> {
+    const dynamic = opts.dynamic ?? true;
     return this.prisma.$transaction(async (tx) => {
       await this.lock(tx);
       let cycle = await tx.vnCycle.findFirst({ where: { completedAt: null }, orderBy: { cycleNo: 'desc' } });
@@ -92,19 +93,25 @@ export class NumberPoolService {
         // numbers disabled since the cycle was built are skipped for this cycle
         await tx.$executeRaw`UPDATE "VnCycleSlot" s SET "skippedAt" = ${now}
           FROM "VirtualNumber" v WHERE v.id = s."vnId" AND s."cycleId" = ${cycle.id} AND s."usedAt" IS NULL AND s."skippedAt" IS NULL AND v.status <> 'ACTIVE'`;
-        const rows = await tx.$queryRaw<{ slotId: number; position: number; vnId: number; vn: string; rn: string }[]>`
-          SELECT s.id AS "slotId", s.position, v.id AS "vnId", v.vn, v.rn
+        // DYNAMIC numbers are only handed out while their forwarding is known to be off
+        const rows = await tx.$queryRaw<{ slotId: number; position: number; vnId: number; vn: string; rn: string; routing: 'DYNAMIC' | 'STATIC' }[]>`
+          SELECT s.id AS "slotId", s.position, v.id AS "vnId", v.vn, v.rn, v.routing::text AS routing
           FROM "VnCycleSlot" s JOIN "VirtualNumber" v ON v.id = s."vnId"
           WHERE s."cycleId" = ${cycle.id} AND s."usedAt" IS NULL AND s."skippedAt" IS NULL
             AND v.status = 'ACTIVE'
+            AND (v.routing = 'STATIC' OR (${dynamic} AND v."linkState" = 'OFF'))
             AND (v."leasedUntil" IS NULL OR v."leasedUntil" < ${now})
             AND (v."cooldownUntil" IS NULL OR v."cooldownUntil" < ${now})
           ORDER BY s.position LIMIT 1`;
         if (rows.length) {
           const r = rows[0];
           await tx.vnCycleSlot.update({ where: { id: r.slotId }, data: { usedAt: now } });
-          await tx.virtualNumber.update({ where: { id: r.vnId }, data: { leasedUntil: leaseUntil, lastUsedAt: now, useCount: { increment: 1 } } });
-          return { vnId: r.vnId, vn: r.vn, rn: r.rn, cycleNo: cycle.cycleNo, position: r.position };
+          await tx.virtualNumber.update({ where: { id: r.vnId }, data: {
+            leasedUntil: leaseUntil, lastUsedAt: now, useCount: { increment: 1 },
+            // pessimistic until the carrier confirms: a crash mid-call still gets the forwarding switched off
+            ...(r.routing === 'DYNAMIC' ? { linkState: 'UNKNOWN' as const, unlinkAfter: leaseUntil } : {}),
+          } });
+          return { vnId: r.vnId, vn: r.vn, rn: r.rn, cycleNo: cycle.cycleNo, position: r.position, routing: r.routing };
         }
         const remaining = await tx.vnCycleSlot.count({ where: { cycleId: cycle.id, usedAt: null, skippedAt: null } });
         if (remaining > 0) break; // every remaining number is busy right now
@@ -123,8 +130,70 @@ export class NumberPoolService {
     });
   }
 
+  /** Carrier confirmed forwarding on: the number is reachable until unlinkAfter. */
+  async markLinked(vnId: number, leasedUntil: Date, unlinkAfter: Date, now = new Date()) {
+    await this.prisma.virtualNumber.update({ where: { id: vnId }, data: { linkState: 'ON', leasedUntil, unlinkAfter, linkChangedAt: now, linkFailCount: 0, linkError: null } });
+  }
+
+  /** Forwarding could not be switched on: give the number back (resting) and make sure it is switched off. */
+  async linkFailed(vnId: number, error: string, cooldownSeconds: number, now = new Date()) {
+    await this.prisma.virtualNumber.update({ where: { id: vnId }, data: {
+      linkState: 'UNKNOWN', unlinkAfter: now, linkError: error.slice(0, 200), leasedUntil: null,
+      cooldownUntil: new Date(now.getTime() + Math.max(cooldownSeconds, 30) * 1000),
+    } });
+  }
+
+  /** Bring the forwarding switch-off forward to `at` (never later than already scheduled). */
+  async scheduleUnlink(vnId: number, at: Date) {
+    await this.prisma.$executeRaw`UPDATE "VirtualNumber" SET "unlinkAfter" = LEAST(COALESCE("unlinkAfter", ${at}), ${at}), "updatedAt" = now()
+      WHERE id = ${vnId} AND routing = 'DYNAMIC' AND "linkState" <> 'OFF'`;
+  }
+
+  /** After a restart: anything possibly forwarded without a schedule is switched off now. */
+  async reconcileLinks(now = new Date()) {
+    return this.prisma.$executeRaw`UPDATE "VirtualNumber" SET "unlinkAfter" = ${now}
+      WHERE routing = 'DYNAMIC' AND "linkState" <> 'OFF' AND "unlinkAfter" IS NULL`;
+  }
+
+  /**
+   * Switches off forwarding that is due. Failures stay UNKNOWN (never leased) and are retried with backoff
+   * (2, 4, 8 ... max 60 s).
+   */
+  async unlinkDue(carrier: { enabled: boolean; set: (vnId: number, vn: string, rn: string, link: boolean) => Promise<{ ok: boolean; code: string; message: string }> }, now = new Date(), limit = 20) {
+    if (!carrier.enabled) return { done: 0, failed: 0 };
+    const due = await this.prisma.virtualNumber.findMany({
+      where: { routing: 'DYNAMIC', linkState: { in: ['ON', 'UNKNOWN'] }, unlinkAfter: { lte: now } },
+      orderBy: { unlinkAfter: 'asc' }, take: limit,
+    });
+    let done = 0;
+    let failed = 0;
+    for (const n of due) {
+      const r = await carrier.set(n.id, n.vn, n.rn, false);
+      const t = new Date();
+      if (r.ok) {
+        // only if nobody re-leased it meanwhile (it cannot be: UNKNOWN/ON numbers are never leased)
+        await this.prisma.virtualNumber.updateMany({ where: { id: n.id, linkState: { in: ['ON', 'UNKNOWN'] } },
+          data: { linkState: 'OFF', unlinkAfter: null, linkChangedAt: t, linkFailCount: 0, linkError: null } });
+        done++;
+      } else {
+        const fails = n.linkFailCount + 1;
+        await this.prisma.virtualNumber.update({ where: { id: n.id }, data: {
+          linkState: 'UNKNOWN', linkFailCount: fails, linkError: `${r.code} ${r.message}`.slice(0, 200),
+          unlinkAfter: new Date(t.getTime() + Math.min(60, 2 ** Math.min(fails, 6)) * 1000),
+        } });
+        failed++;
+      }
+    }
+    return { done, failed };
+  }
+
   async summary() {
     const now = new Date();
+    const [linkOn, linkUnknown, linkFailing] = await Promise.all([
+      this.prisma.virtualNumber.count({ where: { routing: 'DYNAMIC', linkState: 'ON' } }),
+      this.prisma.virtualNumber.count({ where: { routing: 'DYNAMIC', linkState: 'UNKNOWN' } }),
+      this.prisma.virtualNumber.count({ where: { routing: 'DYNAMIC', linkFailCount: { gt: 0 } } }),
+    ]);
     const [total, active, leased, cooling, cycle] = await Promise.all([
       this.prisma.virtualNumber.count(),
       this.prisma.virtualNumber.count({ where: { status: 'ACTIVE' } }),
@@ -134,7 +203,7 @@ export class NumberPoolService {
     ]);
     const used = cycle ? await this.prisma.vnCycleSlot.count({ where: { cycleId: cycle.id, usedAt: { not: null } } }) : 0;
     const lines = await this.prisma.virtualNumber.groupBy({ by: ['rn'], _count: { _all: true }, orderBy: { rn: 'asc' } });
-    return { total, active, leased, cooling, cycle: cycle ? { cycleNo: cycle.cycleNo, size: cycle.size, used } : null,
+    return { total, active, leased, cooling, linkOn, linkUnknown, linkFailing, cycle: cycle ? { cycleNo: cycle.cycleNo, size: cycle.size, used } : null,
       lines: lines.map((l) => ({ rn: l.rn, numbers: l._count._all })) };
   }
 

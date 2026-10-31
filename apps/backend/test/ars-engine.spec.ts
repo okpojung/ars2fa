@@ -6,6 +6,7 @@ import { ArsSessionService, parseKstDateTime } from '../src/modules/ars-engine/a
 import { ArsSettingsService } from '../src/modules/ars-engine/ars-settings.service';
 import { IntegrityService } from '../src/modules/ars-engine/integrity/integrity.service';
 import { NumberPoolService, secureShuffle, sequentialRn } from '../src/modules/ars-engine/number-pool.service';
+import { CarrierRequest, CarrierService } from '../src/modules/ars-engine/carrier.service';
 import { PlayIntegrityVerifier } from '../src/modules/ars-engine/integrity/play-integrity';
 import { decodeCbor } from '../src/modules/ars-engine/integrity/cbor';
 import { isHiddenCaller, normalizeKrPhone, openText, sealText } from '../src/modules/ars-engine/phone.util';
@@ -16,7 +17,12 @@ const redis = new RedisService();
 const settings = new ArsSettingsService(prisma);
 const pool = new NumberPoolService(prisma);
 const integrity = new IntegrityService(prisma);
-const sessions = new ArsSessionService(prisma, pool, settings, integrity);
+const carrier = new CarrierService(prisma);
+/** fake CallMix: records every call; numbers in failVns are refused */
+const carrierCalls: CarrierRequest[] = [];
+const failVns = new Set<string>();
+carrier.client = async (req) => { carrierCalls.push(req); return failVns.has(req.vn) ? { resCd: 'FAIL', resMsg: '\uc2e4\ud328' } : { resCd: 'SUCCESS', resMsg: '' }; };
+const sessions = new ArsSessionService(prisma, pool, settings, integrity, carrier);
 const auth = new ApiKeyAuthService(prisma, redis);
 sessions.sleep = async () => undefined; // never actually wait in tests
 
@@ -24,6 +30,8 @@ beforeAll(async () => { await prisma.$connect(); });
 afterAll(async () => { await prisma.$disconnect(); await redis.onModuleDestroy(); });
 beforeEach(async () => {
   await resetDb(prisma);
+  carrierCalls.length = 0;
+  failVns.clear();
   await settings.update({ authlogWaitSeconds: 1, cooldownSeconds: 0 }, 'test');
 });
 
@@ -42,6 +50,9 @@ async function carrierLog(vn: string, an: string, at = new Date(), callId = `cid
   await sessions.recordAuthLog({ vn, an, callStartTime: kst(at), callId });
 }
 
+/** pool mechanics without the carrier: numbers that are always forwarded */
+async function staticOnly() { await prisma.virtualNumber.updateMany({ data: { routing: 'STATIC' } }); }
+
 // ------------------------------------------------------------------------------------------ pool
 
 describe('number pool', () => {
@@ -56,6 +67,7 @@ describe('number pool', () => {
 
   test('one random cycle hands out every number exactly once before reshuffling', async () => {
     await pool.importInventory(numbers(25), LINES);
+    await staticOnly();
     const until = new Date(Date.now() + 60_000);
     const first: string[] = [];
     for (let i = 0; i < 25; i++) {
@@ -73,6 +85,7 @@ describe('number pool', () => {
 
   test('busy numbers are passed over and used later in the same cycle; all busy -> NO_NUMBER_AVAILABLE', async () => {
     await pool.importInventory(numbers(3), LINES);
+    await staticOnly();
     const until = new Date(Date.now() + 60_000);
     const a = await pool.lease(until);
     const b = await pool.lease(until);
@@ -89,6 +102,7 @@ describe('number pool', () => {
 
   test('concurrent leases never return the same number', async () => {
     await pool.importInventory(numbers(40), LINES);
+    await staticOnly();
     const until = new Date(Date.now() + 60_000);
     const got = await Promise.all(Array.from({ length: 20 }, () => pool.lease(until)));
     expect(new Set(got.map((g) => g.vn)).size).toBe(20);
@@ -96,6 +110,7 @@ describe('number pool', () => {
 
   test('disabled numbers are skipped', async () => {
     await pool.importInventory(numbers(3), LINES);
+    await staticOnly();
     const rows = await prisma.virtualNumber.findMany();
     await pool.setStatus(rows[0].id, 'DISABLED', 'admin');
     await pool.setStatus(rows[1].id, 'DISABLED', 'admin');
@@ -333,5 +348,133 @@ describe('settings', () => {
     const s = await settings.update({ leaseSecondsApp: 90, pcCodeEnabled: false }, 'a');
     expect(s).toMatchObject({ leaseSecondsApp: 90, pcCodeEnabled: false });
     expect(await prisma.auditLog.count({ where: { action: 'ARS_SETTINGS_UPDATE' } })).toBeGreaterThan(0);
+  });
+});
+
+// ------------------------------------------------------------------------------------------ carrier (CallMix forwarding)
+
+describe('CallMix forwarding per lease', () => {
+  const vnRow = (id: number) => prisma.virtualNumber.findUniqueOrThrow({ where: { id } });
+
+  test('forwarding is switched on before the number is handed out, and off when the window closes', async () => {
+    const { client } = await setup(5);
+    const r = await sessions.create(client, {});
+    const s = await vnOf(r.session_id);
+    expect(carrierCalls).toEqual([{ vn: s.vn, rn: s.rn, link: true }]);
+    expect(r.expires_in).toBe(30);
+    let n = await vnRow(s.vnId);
+    expect(n.linkState).toBe('ON');
+    expect(n.unlinkAfter!.getTime()).toBe(new Date(r.expires_at).getTime());
+    // nothing due yet
+    expect(await pool.unlinkDue(carrier, new Date())).toEqual({ done: 0, failed: 0 });
+    // 30 s later the forwarding goes off even though the session waits a little longer for a late call
+    expect(await pool.unlinkDue(carrier, new Date(Date.now() + 31_000))).toEqual({ done: 1, failed: 0 });
+    expect(carrierCalls[1]).toEqual({ vn: s.vn, rn: s.rn, link: false });
+    n = await vnRow(s.vnId);
+    expect(n.linkState).toBe('OFF');
+    expect((await vnOf(r.session_id)).status).toBe('PENDING');
+  });
+
+  test('a decided call switches the forwarding off at hangup (or 20 s after the decision)', async () => {
+    const { client } = await setup(5);
+    const r = await sessions.create(client, {});
+    const s = await vnOf(r.session_id);
+    await carrierLog(s.vn, '01097111104');
+    expect((await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'hx1', t0: new Date(), confirmKey: '1' })).result).toBe('OK');
+    const n1 = await vnRow(s.vnId);
+    expect(n1.unlinkAfter!.getTime()).toBeLessThanOrEqual(Date.now() + 21_000);
+    await sessions.callEnded('hx1');
+    expect(await pool.unlinkDue(carrier, new Date(Date.now() + 100))).toEqual({ done: 1, failed: 0 });
+    expect((await vnRow(s.vnId)).linkState).toBe('OFF');
+    expect((await prisma.pbxCall.findUniqueOrThrow({ where: { uniqueId: 'hx1' } })).endedAt).not.toBeNull();
+  });
+
+  test('a refused number is skipped (next number tried) and is never handed out until switched off', async () => {
+    const { client } = await setup(3);
+    const all = await prisma.virtualNumber.findMany({ orderBy: { ordinal: 'asc' } });
+    // carrier refuses everything -> 503 after trying 3 numbers
+    all.forEach((x) => failVns.add(x.vn));
+    await expect(sessions.create(client, {})).rejects.toMatchObject({ response: { code: 'CARRIER_UNAVAILABLE' } });
+    expect((await prisma.virtualNumber.findMany()).every((x) => x.linkState === 'UNKNOWN')).toBe(true);
+    // refused numbers are switched off by the sweeper before they can be used again
+    failVns.clear();
+    expect((await pool.unlinkDue(carrier, new Date(Date.now() + 1000))).done).toBe(3);
+    await prisma.virtualNumber.updateMany({ data: { cooldownUntil: null } });
+    // now two of three are refused: the session gets the third
+    failVns.add(all[0].vn); failVns.add(all[1].vn);
+    const r = await sessions.create(client, {});
+    expect((await vnOf(r.session_id)).vn).toBe(all[2].vn);
+  });
+  test('a failed switch-off is retried with backoff and the number stays out of the pool meanwhile', async () => {
+    const { client } = await setup(1);
+    const r = await sessions.create(client, {});
+    const s = await vnOf(r.session_id);
+    await sessions.cancel(client, r.session_id);
+    failVns.add(s.vn);
+    expect(await pool.unlinkDue(carrier, new Date(Date.now() + 100))).toEqual({ done: 0, failed: 1 });
+    let n = await vnRow(s.vnId);
+    expect(n.linkState).toBe('UNKNOWN');
+    expect(n.linkFailCount).toBe(1);
+    expect(n.unlinkAfter!.getTime()).toBeGreaterThan(Date.now());
+    await expect(sessions.create(client, {})).rejects.toThrow('NO_NUMBER_AVAILABLE');
+    failVns.clear();
+    expect(await pool.unlinkDue(carrier, new Date(Date.now() + 61_000))).toEqual({ done: 1, failed: 0 });
+    n = await vnRow(s.vnId);
+    expect(n).toMatchObject({ linkState: 'OFF', linkFailCount: 0 });
+    expect((await sessions.create(client, {})).dial_number).toBeTruthy();
+  });
+
+  test('precheck: calls are expected on a 070 only while a session waits there', async () => {
+    const { client } = await setup(3);
+    expect(await sessions.precheck(LINES[0])).toBe(false);
+    const r = await sessions.create(client, {});
+    const s = await vnOf(r.session_id);
+    expect(await sessions.precheck(s.rn)).toBe(true);
+    expect(await sessions.precheck(LINES.find((l) => l !== s.rn)!)).toBe(false);
+    await sessions.cancel(client, r.session_id);
+    expect(await sessions.precheck(s.rn)).toBe(false);
+  });
+
+  test('PC mode: after the call the user gets pcCodeSeconds to type the digits', async () => {
+    const { client } = await setup(3);
+    await settings.update({ pcCodeSeconds: 90 }, 'test');
+    const r = await sessions.create(client, { mode: 'PC' });
+    const s = await vnOf(r.session_id);
+    await carrierLog(s.vn, '01097111104');
+    await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'pc9', t0: new Date(), confirmKey: '1' });
+    const after = await vnOf(r.session_id);
+    expect(after.status).toBe('CALL_CONFIRMED');
+    expect(after.expiresAt.getTime()).toBeGreaterThan(Date.now() + 80_000);
+  });
+
+  test('STATIC numbers are used without any carrier call; without credentials DYNAMIC numbers are not leased', async () => {
+    const { client } = await setup(2);
+    const rows = await prisma.virtualNumber.findMany({ orderBy: { ordinal: 'asc' } });
+    await prisma.virtualNumber.update({ where: { id: rows[0].id }, data: { routing: 'STATIC' } });
+    const saved = carrier.client;
+    carrier.client = null;
+    try {
+      const r = await sessions.create(client, {});
+      expect((await vnOf(r.session_id)).vn).toBe(rows[0].vn);
+      await expect(sessions.create(client, {})).rejects.toThrow('NO_NUMBER_AVAILABLE');
+    } finally {
+      carrier.client = saved;
+    }
+    expect(carrierCalls).toHaveLength(0);
+  });
+
+  test('CallMix client sends linkYn, rn, coloring/comment 0 and parses resCd', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ resCd: 'SUCCESS', resMsg: '' }), { status: 200 }));
+    try {
+      const c = CarrierService.fromEnv({ CALLMIX_ID: 'idx', CALLMIX_PW: 'pwx' } as NodeJS.ProcessEnv)!;
+      expect(await c({ vn: '050700952000', rn: '07051901950', link: false })).toEqual({ resCd: 'SUCCESS', resMsg: '' });
+      const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://m.callmix.co.kr/cmxapi/vnMapping');
+      const body = Object.fromEntries(new URLSearchParams(String(init.body)));
+      expect(body).toMatchObject({ id: 'idx', pw: 'pwx', vn: '050700952000', rn: '07051901950', linkYn: 'n', colorRing: '0', callMent: '0' });
+      expect(CarrierService.fromEnv({} as NodeJS.ProcessEnv)).toBeNull();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

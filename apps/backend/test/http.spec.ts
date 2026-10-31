@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { NumberPoolService } from '../src/modules/ars-engine/number-pool.service';
 import { ArsSessionService } from '../src/modules/ars-engine/ars-session.service';
+import { CarrierService } from '../src/modules/ars-engine/carrier.service';
 import { kst, LINES, numbers, resetDb, seedClient } from './helpers';
 
 const KEY = 'k'.repeat(40);
@@ -19,6 +20,7 @@ beforeAll(async () => {
   await app.init();
   prisma = app.get(PrismaService);
   app.get(ArsSessionService).sleep = async () => undefined;
+  app.get(CarrierService).client = async () => ({ resCd: 'SUCCESS', resMsg: '' });
 });
 afterAll(async () => { await app.close(); });
 beforeEach(async () => { await resetDb(prisma); });

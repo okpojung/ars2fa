@@ -2,8 +2,9 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export type ArsSettings = {
-  leaseSecondsApp: number;      // time the app has to place the call
+  leaseSecondsApp: number;      // time the app has to place the call (forwarding is on only this long)
   leaseSecondsPc: number;       // time for QR scan + call (PC mode)
+  pcCodeSeconds: number;        // PC mode: time to type the 2 digits after the call was confirmed
   cooldownSeconds: number;      // a number rests this long after a session ends
   authlogWaitSeconds: number;   // PBX waits at most this long for the carrier AuthLog
   confirmKeyRequired: boolean;  // caller must press 1 after the phishing notice
@@ -13,8 +14,9 @@ export type ArsSettings = {
 };
 
 export const ARS_SETTING_DEFAULTS: ArsSettings = {
-  leaseSecondsApp: 60,
-  leaseSecondsPc: 120,
+  leaseSecondsApp: 30,
+  leaseSecondsPc: 30,
+  pcCodeSeconds: 90,
   cooldownSeconds: 120,
   authlogWaitSeconds: 6,
   confirmKeyRequired: true,
@@ -24,8 +26,9 @@ export const ARS_SETTING_DEFAULTS: ArsSettings = {
 };
 
 const BOUNDS: Record<string, [number, number]> = {
-  leaseSecondsApp: [20, 600],
-  leaseSecondsPc: [30, 900],
+  leaseSecondsApp: [15, 600],
+  leaseSecondsPc: [15, 900],
+  pcCodeSeconds: [30, 600],
   cooldownSeconds: [0, 3600],
   authlogWaitSeconds: [1, 20],
   pcCodeMaxAttempts: [1, 10],

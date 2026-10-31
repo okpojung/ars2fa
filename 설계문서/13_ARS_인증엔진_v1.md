@@ -28,6 +28,21 @@
 - 발신번호: `CALLERID(num)`과 `P-Asserted-Identity`는 비어 있고 **`From` 헤더에만** 휴대폰 번호가 온다. 다이얼플랜은 num → PAI → From 순으로 읽는다(`deploy/asterisk/from-skb.conf`).
 - 첫 실통화 성공: 발신 후 다우 AuthLog 2초 만에 도착, 1번 입력 후 판정 OK, PC 확인 숫자 입력으로 VERIFIED.
 
+## 2-2. CallMix 착신 자동 켜기/끄기 (2026-10-31 사용자 지시)
+
+- 번호 1,000개는 평소 **착신 꺼짐**(linkYn=n, 컬러링·콜멘트 0). 인증을 시작할 때 고른 번호만 `vnMapping`(linkYn=y, rn=배정 070, 컬러링·콜멘트 0)으로 켜고, CallMix가 SUCCESS를 준 뒤에만 앱/QR에 번호를 넘긴다. 거절되면 다음 번호(최대 3개).
+- **30초**(설정 `leaseSecondsApp/Pc`)가 지나거나 인증이 끝나면 끈다. 통화 중이면 통화 종료 알림(다이얼플랜 `h`) 때, 늦어도 판정 20초 뒤.
+- 끄기 실패는 2·4·8…최대 60초 간격으로 재시도하고, 꺼졌다고 확인될 때까지 그 번호는 다시 빌려주지 않는다(상태 `UNKNOWN`). 재시작 시 켜져 있을 수 있는 번호는 모두 끈다.
+- 30초 직전에 건 전화도 처리되도록 세션은 20초 더 기다린다(PENDING 유예). PC 모드는 통화 확인 후 `pcCodeSeconds`(기본 90초) 동안 숫자 입력.
+- 시험 번호 0507-0090-1103은 `STATIC`(CallMix에서 상시 착신, API 호출 안 함).
+- 모든 CallMix 호출은 `CarrierCall` 표에 남는다(결과·지연).
+- CallMix 계정은 서버 `/opt/ars2fa/callmix.env`(600)에만 둔다. 저장 전 계정에 없는 번호(050700000000)로 로그인만 확인해 설정 변경이 없다.
+
+## 2-3. 인증 요청이 아닌 전화
+
+- 응답 직후 `/internal/pbx/precheck`: 그 070에 전화를 기다리는 인증이 없으면 "정상적인 접근이 아닙니다. 전화를 끊겠습니다." 후 종료.
+- 판정 결과가 `no_session`·`no_authlog`·`pool_mismatch`(인증과 무관한 전화)여도 같은 안내. 그 밖의 실패는 "인증 실패" 안내.
+
 ## 3. 판정 (PBX → `POST /internal/pbx/verify`)
 
 1. 발신번호 표시·휴대폰 여부

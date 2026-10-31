@@ -4,8 +4,9 @@ import { useEffect } from 'react';
 import { apiClient } from '../../shared/api/client';
 
 const NUM: [string, string, string, number, number][] = [
-  ['leaseSecondsApp', '앱 인증: 번호 임대 시간', '앱이 전화를 걸 수 있는 시간(초)', 20, 600],
-  ['leaseSecondsPc', 'PC 인증: 번호 임대 시간', 'QR을 찍고 전화를 걸 수 있는 시간(초)', 30, 900],
+  ['leaseSecondsApp', '앱 인증: 전화 걸 수 있는 시간', '번호를 빌려주고 CallMix 착신을 켜 두는 시간(초). 지나면 착신을 끕니다.', 15, 600],
+  ['leaseSecondsPc', 'PC 인증: 전화 걸 수 있는 시간', 'QR을 찍고 전화를 걸 수 있는 시간(초). 지나면 착신을 끕니다.', 15, 900],
+  ['pcCodeSeconds', 'PC 인증: 숫자 입력 시간', '통화 확인 후 PC에 두 자리 숫자를 입력할 수 있는 시간(초)', 30, 600],
   ['cooldownSeconds', '번호 휴식 시간', '인증이 끝난 번호를 다시 쓰기 전 쉬는 시간(초)', 0, 3600],
   ['authlogWaitSeconds', '통신사 기록(AuthLog) 대기', '전화가 들어온 뒤 다우 AuthLog를 기다리는 최대 시간(초)', 1, 20],
   ['pcCodeMaxAttempts', 'PC 확인 숫자 입력 횟수', '틀리면 인증 실패', 1, 10],
