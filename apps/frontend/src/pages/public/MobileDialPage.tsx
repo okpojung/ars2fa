@@ -13,6 +13,24 @@ export function MobileDialPage() {
   const [left, setLeft] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
 
+  // report what the phone shows about itself once (screen, timezone, language, model via UA client hints)
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      const extra: Record<string, string | undefined> = {
+        screen: `${window.screen.width}x${window.screen.height}`,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone, lang: navigator.language,
+      };
+      try {
+        const uad = (navigator as unknown as { userAgentData?: { getHighEntropyValues: (k: string[]) => Promise<Record<string, string>> } }).userAgentData;
+        if (uad) { const v = await uad.getHighEntropyValues(['model', 'platformVersion']); extra.model = v.model || undefined; extra.platformVersion = v.platformVersion || undefined; }
+      } catch { /* not available */ }
+      fetch(`${import.meta.env.VITE_API_BASE_URL ?? '/api'}/public/ars/dial/${encodeURIComponent(token)}/device`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(extra),
+      }).catch(() => undefined);
+    })();
+  }, [token]);
+
   useEffect(() => {
     let stop = false;
     const load = async () => {

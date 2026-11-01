@@ -7,6 +7,7 @@ import { TurnstileService } from './turnstile.service';
 import { getClientIp } from '../../common/request.util';
 import { LoginDto, SignupDto, SignupPhoneStartDto } from './auth.dto';
 import { WidgetService } from '../ars-engine/widget.service';
+import { describeRequest } from '../ars-engine/client-info.util';
 
 @ApiTags('auth')
 @Controller('api')
@@ -41,7 +42,7 @@ export class AuthController {
     await this.turnstile.verify(dto.turnstileToken, getClientIp(req));
     const client = await this.widget.systemClient('ARS2FA-SIGNUP', 'WEB', 'ARS2FA 회원가입');
     return this.widget.startForClient(client, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req),
-      phone: dto.phone, countryCode: dto.countryCode, purpose: '회원가입' });
+      phone: dto.phone, countryCode: dto.countryCode, purpose: '회원가입', clientInfo: describeRequest(req) });
   }
 
   @Post('auth/login')

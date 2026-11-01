@@ -1,5 +1,13 @@
 import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { ApplicationApp } from '@prisma/client';
+import { ApplicationApp, Prisma } from '@prisma/client';
+import { ClientInfo } from './client-info.util';
+
+/** Client info without the raw User-Agent string. */
+export function summarizeClient(v: unknown) {
+  if (!v || typeof v !== 'object') return null;
+  const { ua: _ua, ...rest } = v as ClientInfo;
+  return rest;
+}
 import { randomBytes } from 'crypto';
 import { hmacSha256 } from '../../common/crypto.util';
 import { RedisService } from '../../common/redis.service';
@@ -38,7 +46,7 @@ export class WidgetService {
     private readonly settings: ArsSettingsService,
   ) {}
 
-  async start(input: { siteKey: string; origin?: string; ip?: string; countryCode?: string; phone: string; purpose?: string }) {
+  async start(input: { siteKey: string; origin?: string; ip?: string; countryCode?: string; phone: string; purpose?: string; clientInfo?: ClientInfo }) {
     const origin = normalizeOrigin(input.origin);
     if (!origin) throw new ForbiddenException('ORIGIN_REQUIRED');
     const app = input.siteKey && /^pk_[A-Za-z0-9_-]{16,64}$/.test(input.siteKey)
@@ -50,14 +58,14 @@ export class WidgetService {
     const key = app.application.apiKeys.find((k) => k.status === 'ACTIVE' && (!k.expiresAt || k.expiresAt > new Date()));
     if (!key) throw new ForbiddenException('API_KEY_DISABLED');
 
-    return this.startForClient({ apiKeyId: key.id, app }, { origin, ip: input.ip, phone: input.phone, countryCode: input.countryCode, purpose: input.purpose });
+    return this.startForClient({ apiKeyId: key.id, app }, { origin, ip: input.ip, phone: input.phone, countryCode: input.countryCode, purpose: input.purpose, clientInfo: input.clientInfo });
   }
 
   /**
    * Starts a PC-mode authentication shown in the popup (/w/pc/<token>) for an already resolved client.
    * Used by the widget, the admin/customer live tests and the ARS2FA sign-up page.
    */
-  async startForClient(client: { apiKeyId: string; app: ApplicationApp }, input: { origin: string; ip?: string; phone: string; countryCode?: string; purpose?: string }) {
+  async startForClient(client: { apiKeyId: string; app: ApplicationApp }, input: { origin: string; ip?: string; phone: string; countryCode?: string; purpose?: string; clientInfo?: ClientInfo }) {
     const key = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: client.apiKeyId } });
     // abuse limits: per browser IP, per phone and per key, plus the key's monthly limit
     const minute = Math.floor(Date.now() / 60_000);
@@ -79,7 +87,8 @@ export class WidgetService {
 
     const created = await this.sessions.create(client, { mode: 'PC', expected_phone: phone, country_code: input.countryCode ?? '82', purpose: input.purpose });
     const widgetToken = randomBytes(18).toString('base64url');
-    await this.prisma.arsSession.update({ where: { sessionId: created.session_id }, data: { widgetToken, widgetOrigin: input.origin } });
+    await this.prisma.arsSession.update({ where: { sessionId: created.session_id }, data: { widgetToken, widgetOrigin: input.origin,
+      ...(input.clientInfo ? { pcClient: input.clientInfo as Prisma.InputJsonValue } : {}) } });
     await this.prisma.apiKey.update({ where: { id: key.id }, data: { lastUsedAt: new Date() } });
     const base = (process.env.PUBLIC_DIAL_BASE_URL ?? process.env.APP_URL ?? '').replace(/\/+$/, '');
     return { session_id: created.session_id, popup_url: `${base}/w/pc/${widgetToken}`, expires_at: created.expires_at, server_time: new Date().toISOString() };
@@ -172,6 +181,8 @@ export class WidgetService {
       phone: verified && s.callerPhoneEnc ? openText(s.callerPhoneEnc) : null,
       phone_masked: s.callerPhoneMasked ?? maskPhone(null), verified_at: s.status === 'VERIFIED' ? s.finishedAt?.toISOString() ?? null : null,
       origin: s.widgetOrigin, purpose: s.purpose,
+      // who took part: the browser that started it and the phone that opened the QR page (for the customer's fraud checks)
+      clients: { requester: summarizeClient(s.pcClient), phone: summarizeClient(s.mobileClient) },
     };
   }
 }

@@ -19,6 +19,7 @@ import {
 import { IntegrityService } from './integrity/integrity.service';
 import { NumberPoolService } from './number-pool.service';
 import { WidgetService } from './widget.service';
+import { cleanReportedInfo, describeRequest } from './client-info.util';
 
 function identity(dto: ClientDto, req: Request): ClientIdentity {
   const auth = req.header('authorization');
@@ -54,7 +55,9 @@ export class ArsApiController {
   @Post('sessions')
   async create(@Body() dto: CreateSessionDto, @Req() req: Request) {
     const c = await this.auth.verify(identity(dto, req), getClientIp(req));
-    return this.sessions.create(c, dto);
+    const r = await this.sessions.create(c, dto);
+    await this.sessions.attachStarter(r.session_id, describeRequest(req));
+    return r;
   }
 
   @Post('sessions/status')
@@ -79,7 +82,17 @@ export class ArsPublicController {
   constructor(private readonly sessions: ArsSessionService) {}
 
   @Get('dial/:token')
-  dial(@Param('token') token: string) { return this.sessions.dialPage(token); }
+  async dial(@Param('token') token: string, @Req() req: Request) {
+    await this.sessions.recordMobile(token, describeRequest(req));
+    return this.sessions.dialPage(token);
+  }
+
+  /** The QR page reports what it can see about the phone (screen, timezone, model via UA client hints). */
+  @Post('dial/:token/device')
+  @HttpCode(204)
+  async device(@Param('token') token: string, @Body() body: Record<string, unknown>, @Req() req: Request) {
+    await this.sessions.recordMobile(token, describeRequest(req), cleanReportedInfo(body));
+  }
 }
 
 /** Loopback-only endpoints for the Asterisk dialplan (CURL) and the Daou AuthLog receiver. */
@@ -221,7 +234,7 @@ export class ArsAdminController {
     const items = await this.prisma.arsSession.findMany({
       where: status ? { status: status as never } : {}, orderBy: { createdAt: 'desc' }, take: Math.min(Number(take ?? 100), 500),
       select: { sessionId: true, mobileAppName: true, clientPlatform: true, mode: true, purpose: true, vn: true, rn: true, status: true, failReason: true,
-        callerPhoneMasked: true, integrityVerdict: true, createdAt: true, finishedAt: true, expiresAt: true },
+        callerPhoneMasked: true, integrityVerdict: true, createdAt: true, finishedAt: true, expiresAt: true, pcClient: true, mobileClient: true, widgetOrigin: true },
     });
     return { items };
   }
@@ -261,7 +274,7 @@ export class ArsAdminController {
   @Post('test/popup')
   async testPopup(@Body() dto: { country_code?: string; expected_phone?: string }, @Req() req: Request) {
     const c = await this.testClient();
-    return this.widget.startForClient(c, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req), phone: String(dto?.expected_phone ?? ''), countryCode: dto?.country_code, purpose: '관리자 시험' });
+    return this.widget.startForClient(c, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req), phone: String(dto?.expected_phone ?? ''), countryCode: dto?.country_code, purpose: '관리자 시험', clientInfo: describeRequest(req) });
   }
 
   /** Admin console demo of the web widget: a WEB app under the built-in test application (allowed: this site). */

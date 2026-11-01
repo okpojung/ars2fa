@@ -128,6 +128,7 @@ model User {
   contactName     String
   contactPhone    String
   status          UserStatus       @default(ACTIVE)
+  arsSettings     Json?            // customer's own ARS settings (within the admin's ranges)
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
   createdAt       DateTime         @default(now())
@@ -396,6 +397,9 @@ model ArsSession {
   widgetToken        String?          @unique // web widget: one-time token of the popup page
   widgetOrigin       String?          // web widget: page origin the result is posted back to
   widgetConsumedAt   DateTime?        // web widget: result consumed by the customer server (one use)
+  pcCodeSeconds      Int?             // PC mode: code entry time resolved at creation (customer setting or default)
+  pcClient           Json?            // browser that started the authentication (ip, browser, os, ...)
+  mobileClient       Json?            // phone that opened the QR page (ip, device, browser, os, screen, ...)
   pcCodeAttempts     Int              @default(0)
   confirmKey         Boolean          @default(true) // APP mode: press-1 required (app setting or system default at creation)
   integrityVerdict   IntegrityVerdict @default(NOT_PROVIDED)

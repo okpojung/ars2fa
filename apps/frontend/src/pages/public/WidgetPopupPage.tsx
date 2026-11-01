@@ -52,7 +52,8 @@ export function WidgetPopupPage() {
     posted.current = true;
     const msg = { type: 'ars2fa:result', status: d.state, sessionId: d.session_id, phoneMasked: d.phone_masked ?? null, reason: d.fail_reason ?? null };
     try { if (window.opener && d.origin) window.opener.postMessage(msg, d.origin); } catch { /* opener gone */ }
-    if (d.state === 'VERIFIED') setTimeout(() => window.close(), 2500);
+    // success and failure both close by themselves (the page that opened the popup shows the result)
+    setTimeout(() => window.close(), d.state === 'VERIFIED' ? 2500 : 3000);
   }, [d, final]);
 
   const callLeft = useLeft(d?.state === 'PENDING' ? d.expires_at : null, offset);
@@ -91,7 +92,7 @@ export function WidgetPopupPage() {
 
       {d?.state === 'VERIFIED' && <Result status="success" title="휴대폰 인증 완료" subTitle={`${d.phone_masked ?? ''} · 이 창은 곧 닫힙니다.`} />}
       {d && ['FAILED', 'EXPIRED', 'CANCELED'].includes(d.state) && (
-        <Result status="error" title="인증하지 못했습니다" subTitle={FAIL_REASON_LABEL[d.fail_reason ?? ''] ?? '다시 시도해 주세요.'}
+        <Result status="error" title="인증하지 못했습니다" subTitle={`${FAIL_REASON_LABEL[d.fail_reason ?? ''] ?? '다시 시도해 주세요.'} · 이 창은 곧 닫힙니다.`}
           extra={<Button onClick={() => window.close()}>닫기</Button>} />
       )}
       {d?.state === 'NOT_FOUND' && <Result status="warning" title="잘못된 인증 창입니다" extra={<Button onClick={() => window.close()}>닫기</Button>} />}

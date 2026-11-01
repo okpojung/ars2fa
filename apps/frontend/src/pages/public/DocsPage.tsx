@@ -1,6 +1,7 @@
 import { Button } from 'antd';
 import { Link } from 'react-router-dom';
 import './site.css';
+import { useAuthStore } from '../../shared/auth/authStore';
 
 const BASE = 'https://ars2fa.baro.me';
 
@@ -63,27 +64,81 @@ const CREATE_PC = `POST ${BASE}/v1/ars/sessions
 // 전화가 연결되면 status 응답에 인증번호가 생깁니다
 { "status": "CALL_CONFIRMED", "pc_code": "4821", "code_expires_at": "...", "code_seconds": 15, "server_time": "..." }`;
 
-const WIDGET = `<script src="${BASE}/widget.js"></script>
+const WIDGET_A = `<script src="${BASE}/widget.js"></script>
 
 <form method="post" action="/contact">
-  <div id="phone-auth"></div>
-  <button id="send" type="submit" disabled>보내기</button>
+  <input name="name" placeholder="이름">
+  <div id="phone-auth"></div>                 <!-- 휴대폰 입력란 + [휴대폰 인증] 버튼이 그려집니다 -->
+  <textarea name="message"></textarea>
+  <button id="send" type="submit" disabled>메일 보내기</button>
 </form>
+
 <script>
   ARS2FA.render('#phone-auth', {
-    siteKey: 'pk_...',
-    onVerified: function (r) { document.getElementById('send').disabled = false; }
+    siteKey: 'pk_...',                         // 콘솔 앱 설정의 사이트 키
+    purpose: '문의하기',                        // 선택: 인증 내역에 남는 목적
+    onVerified: function (r) { document.getElementById('send').disabled = false; },
+    onReset:    function ()  { document.getElementById('send').disabled = true; },
+    onFailed:   function (r) { console.log(r.status, r.reason); }
   });
-  // 이미 있는 입력란을 쓸 때 (버튼 click 안에서):
-  // ARS2FA.verify({ siteKey: 'pk_...', phone: '010-1234-5678' }).then(function (r) { ... r.sessionId ... });
 </script>`;
+
+const WIDGET_B = `<script src="${BASE}/widget.js"></script>
+
+<input id="phone" placeholder="010-1234-5678">
+<button id="verify" type="button">휴대폰 인증</button>
+<input type="hidden" name="ars2fa_session" id="ars2fa_session">
+
+<script>
+  document.getElementById('verify').onclick = function () {
+    ARS2FA.verify({ siteKey: 'pk_...', phone: document.getElementById('phone').value, purpose: '회원가입' })
+      .then(function (r) {
+        if (r.status === 'VERIFIED') {
+          document.getElementById('ars2fa_session').value = r.sessionId;   // 서버로 보내 확인
+          document.getElementById('phone').readOnly = true;                // 인증한 번호 고정
+        } else {
+          alert(r.message || '휴대폰 인증을 하지 못했습니다.');
+        }
+      });
+  };
+</script>`;
+
+const WIDGET_SERVER = `// Node.js (Express)
+const r = await fetch('${BASE}/v1/widget/verify', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.ARS2FA_API_KEY },
+  body: JSON.stringify({ session_id: req.body.ars2fa_session, consume: true }),
+}).then((x) => x.json());
+if (!r.verified || r.phone !== req.body.phone.replace(/\\D/g, '')) return res.status(400).send('휴대폰 인증이 필요합니다');
+
+// PHP
+$ch = curl_init('${BASE}/v1/widget/verify');
+curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . getenv('ARS2FA_API_KEY')],
+  CURLOPT_POSTFIELDS => json_encode(['session_id' => $_POST['ars2fa_session'], 'consume' => true])]);
+$r = json_decode(curl_exec($ch), true);
+if (empty($r['verified']) || $r['phone'] !== preg_replace('/\\D/', '', $_POST['phone'])) { http_response_code(400); exit; }
+
+# Python (requests)
+r = requests.post('${BASE}/v1/widget/verify', timeout=10,
+    headers={'Authorization': 'Bearer ' + os.environ['ARS2FA_API_KEY']},
+    json={'session_id': form['ars2fa_session'], 'consume': True}).json()
+if not r.get('verified') or r['phone'] != re.sub(r'\\D', '', form['phone']):
+    abort(400)`;
 
 const WIDGET_VERIFY = `POST ${BASE}/v1/widget/verify
 Authorization: Bearer <비밀 API Key>
 { "session_id": "<ars2fa_session>", "consume": true }
 
 200 OK
-{ "verified": true, "phone": "01012345678", "phone_masked": "010****5678", "verified_at": "...", "origin": "https://www.example.com" }`;
+{
+  "verified": true, "phone": "01012345678", "phone_masked": "010****5678", "reason": null,
+  "verified_at": "...", "origin": "https://www.example.com", "purpose": "문의하기",
+  "clients": {
+    "requester": { "ip": "203.0.113.10", "browser": "Chrome 141", "os": "Windows 10/11", "device": "Windows PC" },
+    "phone":     { "ip": "223.38.x.x", "device": "Samsung SM-S918N", "browser": "삼성 인터넷 25", "os": "Android 14", "screen": "412x915" }
+  }
+}`;
 const FLUTTER = `# pubspec.yaml
 dependencies:
   ars_login:
@@ -106,16 +161,30 @@ if (result != null && result.success) {
 }`;
 
 export function DocsPage() {
+  // ?embed=1: shown inside the customer console (iframe) without the site header/footer
+  const embed = new URLSearchParams(window.location.search).get('embed') === '1';
+  const principal = useAuthStore((s) => s.principal);
+  const member = principal?.kind === 'user' || principal?.kind === 'admin';
   return (
     <div className="site">
-      <header className="site-nav">
+      {!embed && <header className="site-nav">
         <Link to="/" className="site-logo">ARS2FA</Link>
         <nav>
           <Link to="/">서비스 소개</Link>
           <Link to="/login">로그인</Link>
           <Link to="/signup"><Button type="primary" size="small">API 신청하기</Button></Link>
         </nav>
-      </header>
+      </header>}
+      {!member ? (
+        <article className="site-docs" style={{ textAlign: 'center', paddingTop: 80 }}>
+          <h1>개발자 가이드</h1>
+          <p>개발자 가이드는 <b>회원 전용</b>입니다. 로그인하거나 회원 가입 후 확인하세요.</p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
+            <Link to="/login?next=/docs"><Button type="primary" size="large">로그인</Button></Link>
+            <Link to="/signup"><Button size="large">회원 가입</Button></Link>
+          </div>
+        </article>
+      ) : (
       <article className="site-docs">
         <h1>개발자 가이드</h1>
         <p>ARS2FA는 사용자가 직접 거는 전화를 통신사 발신 기록으로 확인해 휴대폰 번호를 인증합니다. 아래 API 세 개로 연동합니다.</p>
@@ -154,19 +223,55 @@ export function DocsPage() {
           <li>입력한 휴대폰이 아닌 번호로 걸면 <code>phone_mismatch</code>로 실패합니다.</li>
         </ul>
 
-        <h2 id="web-widget">3-1. 웹 위젯 (팝업, 개발 언어 무관)</h2>
+        <h2 id="web-widget">3-1. 웹 위젯 적용 방법 (팝업, 개발 언어 무관)</h2>
         <p>
-          웹사이트의 가입·문의 폼에 <b>스크립트 한 줄</b>로 붙입니다. [휴대폰 인증]을 누르면 팝업 창에서 QR → 전화 → 인증번호 입력 → 결과까지 진행되고,
-          인증되면 폼에 <code>ars2fa_session</code> 값이 채워집니다. 콘솔에서 앱 종류를 <b>웹사이트</b>로 신청하고 허용 사이트 주소를 등록한 뒤 <b>사이트 키</b>(공개용 <code>pk_…</code>)를 발급받으세요.
+          가입·로그인·문의 폼처럼 <b>웹 페이지에서 휴대폰 본인 확인</b>이 필요할 때 씁니다. 페이지에는 스크립트 한 줄과 공개 <b>사이트 키</b>만 넣고,
+          [휴대폰 인증]을 누르면 <b>팝업 창</b>에서 QR → 전화 → 인증번호 입력 → 결과까지 진행됩니다. 결과는 페이지로 돌아오고, 마지막 확인은 <b>고객 서버</b>가 합니다.
         </p>
-        <pre><code>{WIDGET}</code></pre>
-        <p><b>서버에서 반드시 확인</b>하세요. 브라우저가 보낸 값만 믿으면 우회될 수 있습니다.</p>
+        <table>
+          <thead><tr><th>단계</th><th>할 일</th></tr></thead>
+          <tbody>
+            <tr><td>1. 웹사이트 등록</td><td>콘솔 → <b>API 신청·앱 설정</b> → 신규 신청에서 플랫폼을 <b>웹사이트 (팝업 위젯)</b>로 고르고 사이트 주소(<code>https://…</code>, 여러 개는 쉼표)를 적어 제출합니다. 관리자가 승인합니다.</td></tr>
+            <tr><td>2. 키 받기</td><td>승인되면 앱 설정에서 <b>사이트 키 발급</b>(<code>pk_…</code>, 웹 페이지에 넣는 공개 키), <b>API Key</b> 메뉴에서 <b>키 발급</b>(비밀 키, 서버에만 보관)을 받습니다.</td></tr>
+            <tr><td>3. 페이지에 붙이기</td><td>아래 A 또는 B 방식으로 스크립트를 넣습니다.</td></tr>
+            <tr><td>4. 서버에서 확인</td><td>폼을 처리하기 전에 <code>POST /v1/widget/verify</code>로 결과를 확인합니다(1회용).</td></tr>
+            <tr><td>5. 시험</td><td>콘솔 <b>ARS 실통화 시험</b>에서 휴대폰으로 직접 확인합니다.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>A. 위젯이 입력란과 버튼을 그리는 방식 (가장 간단)</h3>
+        <pre><code>{WIDGET_A}</code></pre>
+        <p>인증되면 폼 안에 숨은 입력 <code>ars2fa_session</code>이 자동으로 채워지고 <code>onVerified</code>가 호출됩니다. 번호를 고치면 값이 지워지고 <code>onReset</code>이 호출됩니다.</p>
+
+        <h3>B. 이미 있는 휴대폰 입력란을 쓰는 방식</h3>
+        <pre><code>{WIDGET_B}</code></pre>
+        <p><code>ARS2FA.verify()</code>는 <b>버튼 click 처리 안에서 바로</b> 호출하세요(팝업 차단 방지). 결과 <code>r.status</code>: <code>VERIFIED</code> · <code>FAILED</code> · <code>EXPIRED</code> · <code>CLOSED</code>(창 닫음) · <code>ERROR</code>(<code>r.message</code>에 이유).</p>
+
+        <h3>4. 서버에서 확인 (필수)</h3>
+        <p>브라우저가 보낸 값만 믿으면 우회될 수 있습니다. 폼을 처리하기 전에 비밀 API Key로 확인하고, <code>verified</code>가 true이고 <b>폼의 번호와 같을 때만</b> 처리하세요. <code>consume: true</code>는 한 번만 성공합니다(가입 1건·문의 1건).</p>
         <pre><code>{WIDGET_VERIFY}</code></pre>
+        <pre><code>{WIDGET_SERVER}</code></pre>
+        <table>
+          <thead><tr><th>응답 필드</th><th>의미</th></tr></thead>
+          <tbody>
+            <tr><td><code>verified</code></td><td>인증 성공이고 아직 쓰지 않은 결과면 true</td></tr>
+            <tr><td><code>phone</code> / <code>phone_masked</code></td><td>통신사가 확인한 휴대폰 번호 (성공일 때만 원문)</td></tr>
+            <tr><td><code>reason</code></td><td>실패 사유 (<code>already_used</code> = 이미 사용한 결과)</td></tr>
+            <tr><td><code>verified_at</code>, <code>origin</code>, <code>purpose</code></td><td>인증 시각, 요청한 사이트, 목적</td></tr>
+            <tr><td><code>clients.requester</code></td><td>인증을 요청한 브라우저: IP, 브라우저, 운영체제, 기기</td></tr>
+            <tr><td><code>clients.phone</code></td><td>QR을 연 휴대폰: IP, 기종, 브라우저, 운영체제, 화면, 언어, 시간대</td></tr>
+          </tbody>
+        </table>
+
+        <h3>자주 묻는 질문</h3>
         <ul>
-          <li>사이트 키는 등록한 주소의 페이지에서만 동작하고, IP·번호·사이트별 요청 횟수 제한이 걸립니다.</li>
-          <li><code>consume: true</code> 로 확인하면 같은 인증을 두 번 쓸 수 없습니다(가입 1건·문의 1건).</li>
-          <li>팝업 차단을 피하려면 <code>ARS2FA.verify()</code>는 버튼 click 처리 안에서 바로 호출하세요.</li>
+          <li><b>팝업이 안 떠요</b>: 브라우저 주소창의 팝업 차단 아이콘에서 해당 사이트의 팝업을 허용하세요. <code>verify()</code>를 click 처리 밖(예: 응답을 기다린 뒤)에서 부르면 차단됩니다.</li>
+          <li><b>ORIGIN_NOT_ALLOWED</b>: 등록한 사이트 주소와 페이지 주소가 다릅니다(<code>www</code> 유무, <code>http/https</code> 포함). 앱 설정의 허용 사이트에 추가하세요.</li>
+          <li><b>429 / TOO_MANY_REQUESTS</b>: 같은 IP·번호로 짧은 시간에 너무 많이 요청했습니다. 잠시 후 다시 시도합니다.</li>
+          <li><b>해외 번호</b>: 지금은 +82(한국 휴대폰)만 인증할 수 있습니다.</li>
+          <li><b>시간·자릿수 조정</b>: 콘솔 <b>ARS 설정</b>에서 전화 걸 수 있는 시간, 인증번호 입력 시간과 자릿수를 정할 수 있습니다.</li>
         </ul>
+
         <h2>4. 실패 사유</h2>
         <table>
           <thead><tr><th>fail_reason</th><th>의미</th></tr></thead>
@@ -191,12 +296,13 @@ export function DocsPage() {
           <li>앱 위조 방지: Play Integrity(Android) / App Attest(iOS) 토큰을 함께 보내면 정품 앱만 허용할 수 있습니다 (<code>/v1/ars/integrity/challenge</code>).</li>
         </ul>
       </article>
-      <footer className="site-footer">
+      )}
+      {!embed && <footer className="site-footer">
         <div className="site-wrap">
           <div><b>ARS2FA</b> · (주)이지트론 · 문의 <a href="tel:0507-0090-1105">0507-0090-1105</a> · <a href="mailto:baro@baro.me">baro@baro.me</a></div>
           <div><Link to="/">서비스 소개</Link> · <Link to="/login">고객 로그인</Link></div>
         </div>
-      </footer>
+      </footer>}
     </div>
   );
 }

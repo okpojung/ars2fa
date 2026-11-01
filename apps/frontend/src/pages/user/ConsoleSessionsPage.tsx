@@ -2,6 +2,7 @@ import { Select, Space, Table, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { apiClient } from '../../shared/api/client';
+import { ClientInfoView, clientSummary } from '../../shared/ars/ClientInfoView';
 import { SESSION_STATUS, SessionResult } from './ConsoleDashboardPage';
 
 export function ConsoleSessionsPage() {
@@ -20,6 +21,7 @@ export function ConsoleSessionsPage() {
         <Typography.Text type="secondary">휴대폰 번호는 가운데를 가려 표시합니다. 전체 번호는 API 결과로만 전달됩니다.</Typography.Text>
       </Space>
       <Table<Record<string, any>> rowKey="sessionId" size="small" loading={isLoading} dataSource={data ?? []}
+        expandable={{ expandedRowRender: (r) => <ClientInfoView r={r} /> }}
         columns={[
           { title: '시각', dataIndex: 'createdAt', render: (v) => new Date(v).toLocaleString('ko-KR') },
           { title: '세션 ID', dataIndex: 'sessionId', render: (v) => <Typography.Text code copyable>{v}</Typography.Text> },
@@ -28,7 +30,7 @@ export function ConsoleSessionsPage() {
           { title: '방식', dataIndex: 'mode', render: (v) => (v === 'PC' ? 'PC' : '앱') },
           { title: '목적', dataIndex: 'purpose', render: (v) => v ?? '-' },
           { title: '휴대폰', dataIndex: 'callerPhoneMasked', render: (v) => v ?? '-' },
-          { title: '앱 무결성', dataIndex: 'integrityVerdict' },
+          { title: '기기 · 브라우저', render: (_, r) => clientSummary(r) },
           { title: '결과', render: (_, r) => <SessionResult r={r} /> },
         ]} />
     </>

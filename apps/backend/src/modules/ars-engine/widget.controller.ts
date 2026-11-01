@@ -4,6 +4,7 @@ import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-valid
 import type { Request } from 'express';
 import { getClientIp } from '../../common/request.util';
 import { WidgetService } from './widget.service';
+import { describeRequest } from './client-info.util';
 
 export class WidgetStartDto {
   @IsString() @Matches(/^pk_[A-Za-z0-9_-]{16,64}$/) site_key!: string;
@@ -29,7 +30,7 @@ export class WidgetController {
   @Post('v1/widget/sessions')
   @HttpCode(200)
   start(@Body() dto: WidgetStartDto, @Req() req: Request) {
-    return this.widget.start({ siteKey: dto.site_key, origin: req.header('origin'), ip: getClientIp(req), countryCode: dto.country_code, phone: dto.phone, purpose: dto.purpose });
+    return this.widget.start({ siteKey: dto.site_key, origin: req.header('origin'), ip: getClientIp(req), countryCode: dto.country_code, phone: dto.phone, purpose: dto.purpose, clientInfo: describeRequest(req) });
   }
 
   /** Customer server: confirms a widget result with the secret API key (Authorization: Bearer). */

@@ -37,6 +37,31 @@ const BOUNDS: Record<string, [number, number]> = {
   pcCodeMaxAttempts: [1, 10],
 };
 
+/** Settings a customer may set for its own account, with the ranges allowed to customers. */
+export const CUSTOMER_SETTING_BOUNDS: Record<string, [number, number]> = {
+  leaseSecondsApp: [15, 120],
+  leaseSecondsPc: [20, 120],
+  pcCodeSeconds: [10, 60],
+  pcCodeDigits: [3, 6],
+};
+export const CUSTOMER_SETTING_KEYS = ['leaseSecondsApp', 'leaseSecondsPc', 'pcCodeSeconds', 'pcCodeDigits', 'confirmKeyRequired'] as const;
+export type CustomerSettingKey = (typeof CUSTOMER_SETTING_KEYS)[number];
+export type CustomerSettings = Partial<Pick<ArsSettings, CustomerSettingKey>>;
+
+/** Keeps only valid customer settings (unknown keys dropped, numbers clamped to the customer ranges). */
+export function cleanCustomerSettings(raw: unknown): CustomerSettings {
+  const out: CustomerSettings = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const k of CUSTOMER_SETTING_KEYS) {
+    const v = (raw as Record<string, unknown>)[k];
+    if (k === 'confirmKeyRequired') { if (typeof v === 'boolean') out.confirmKeyRequired = v; continue; }
+    if (typeof v === 'number' && Number.isInteger(v)) {
+      const [min, max] = CUSTOMER_SETTING_BOUNDS[k];
+      (out as Record<string, number>)[k] = Math.min(max, Math.max(min, v));
+    }
+  }
+  return out;
+}
 @Injectable()
 export class ArsSettingsService {
   private cache: { at: number; value: ArsSettings } | null = null;
@@ -53,6 +78,11 @@ export class ArsSettingsService {
     }
     this.cache = { at: Date.now(), value };
     return value;
+  }
+
+  /** System settings with a customer's own values applied (customer settings win, within the customer ranges). */
+  async forCustomer(customer: unknown): Promise<ArsSettings> {
+    return { ...(await this.get()), ...cleanCustomerSettings(customer) };
   }
 
   async update(patch: Partial<Record<keyof ArsSettings, unknown>>, actor: string): Promise<ArsSettings> {

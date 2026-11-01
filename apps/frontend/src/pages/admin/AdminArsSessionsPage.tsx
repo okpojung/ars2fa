@@ -2,6 +2,7 @@ import { Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { apiClient } from '../../shared/api/client';
+import { ClientInfoView } from '../../shared/ars/ClientInfoView';
 
 const STATUS: Record<string, [string, string]> = {
   PENDING: ['전화 대기', 'gold'], CALL_CONFIRMED: ['PC 숫자 대기', 'blue'], VERIFIED: ['성공', 'green'],
@@ -30,6 +31,7 @@ export function AdminArsSessionsPage() {
                 options={Object.entries(STATUS).map(([v, [l]]) => ({ value: v, label: l }))} />
             </Space>
             <Table<Record<string, any>> rowKey="sessionId" size="small" loading={sessions.isLoading} dataSource={sessions.data?.items ?? []}
+              expandable={{ expandedRowRender: (r) => <ClientInfoView r={r} /> }}
               columns={[
                 { title: '요청', dataIndex: 'createdAt', render: dt },
                 { title: '앱', render: (_, r) => `${r.mobileAppName} (${r.clientPlatform}/${r.mode})` },

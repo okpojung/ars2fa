@@ -5,9 +5,10 @@ import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
 import { generateApiKey, getKeyPrefix, hmacSha256 } from '../../common/crypto.util';
 import { RedisService } from '../../common/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ArsSettingsService } from './ars-settings.service';
+import { ArsSettingsService, CUSTOMER_SETTING_BOUNDS, CUSTOMER_SETTING_KEYS, cleanCustomerSettings } from './ars-settings.service';
 import { parseOrigins, WidgetService } from './widget.service';
 import { getClientIp } from '../../common/request.util';
+import { describeRequest } from './client-info.util';
 import { randomBytes } from 'crypto';
 
 export class TestPopupDto {
@@ -49,15 +50,44 @@ export class CustomerConsoleController {
       where: { apiKey: { application: { userId } }, ...(status ? { status: status as never } : {}) },
       orderBy: { createdAt: 'desc' }, take: Math.min(Number(take ?? 200), 500),
       select: { sessionId: true, mobileAppName: true, clientPlatform: true, mode: true, purpose: true, status: true, failReason: true,
-        callerPhoneMasked: true, integrityVerdict: true, confirmKey: true, createdAt: true, finishedAt: true },
+        callerPhoneMasked: true, integrityVerdict: true, confirmKey: true, createdAt: true, finishedAt: true, pcClient: true, mobileClient: true, widgetOrigin: true },
     });
+  }
+
+  /** The customer's own ARS settings: effective values, own overrides, service defaults and allowed ranges. */
+  @Get('ars-settings')
+  async arsSettings(@Req() req: AuthenticatedRequest) {
+    const userId = this.userId(req);
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { arsSettings: true } });
+    const sys = await this.settings.get();
+    const own = cleanCustomerSettings(u.arsSettings);
+    const pick = (o: Record<string, unknown>) => Object.fromEntries(CUSTOMER_SETTING_KEYS.map((k) => [k, o[k]]));
+    return { effective: pick({ ...sys, ...own }), own, defaults: pick(sys as unknown as Record<string, unknown>), bounds: CUSTOMER_SETTING_BOUNDS };
+  }
+
+  /** Sets (value) or clears (null = use the service default) the customer's own settings. */
+  @Patch('ars-settings')
+  async setArsSettings(@Req() req: AuthenticatedRequest, @Body() body: Record<string, unknown>) {
+    const userId = this.userId(req);
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { arsSettings: true } });
+    const own: Record<string, unknown> = { ...cleanCustomerSettings(u.arsSettings) };
+    for (const [k, v] of Object.entries(body ?? {})) {
+      if (!(CUSTOMER_SETTING_KEYS as readonly string[]).includes(k)) throw new BadRequestException(`unknown setting ${k}`);
+      if (v === null) { delete own[k]; continue; }
+      if (k === 'confirmKeyRequired' ? typeof v !== 'boolean' : !(typeof v === 'number' && Number.isInteger(v))) throw new BadRequestException(`invalid ${k}`);
+      if (k !== 'confirmKeyRequired') { const [min, max] = CUSTOMER_SETTING_BOUNDS[k]; if ((v as number) < min || (v as number) > max) throw new BadRequestException(`${k} must be ${min}..${max}`); }
+      own[k] = v;
+    }
+    await this.prisma.user.update({ where: { id: userId }, data: { arsSettings: own as never } });
+    await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'CUSTOMER_ARS_SETTINGS', targetType: 'USER', targetId: userId, details: own as never } });
+    return this.arsSettings(req);
   }
 
   /** Service defaults the customer's per-app settings fall back to. */
   @Get('defaults')
   async defaults(@Req() req: AuthenticatedRequest) {
-    this.userId(req);
-    const s = await this.settings.get();
+    const u = await this.prisma.user.findUniqueOrThrow({ where: { id: this.userId(req) }, select: { arsSettings: true } });
+    const s = await this.settings.forCustomer(u.arsSettings);
     return { confirmKeyRequired: s.confirmKeyRequired, callWindowSeconds: s.leaseSecondsApp, pcCallWindowSeconds: s.leaseSecondsPc, pcCodeSeconds: s.pcCodeSeconds, pcCodeDigits: s.pcCodeDigits };
   }
 
@@ -116,7 +146,7 @@ export class CustomerConsoleController {
     const key = app.application.apiKeys.find((k) => k.status === 'ACTIVE');
     if (!key) throw new ForbiddenException('API_KEY_DISABLED');
     return this.widget.startForClient({ apiKeyId: key.id, app }, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req),
-      phone: dto.expected_phone, countryCode: dto.country_code, purpose: '실통화 시험' });
+      phone: dto.expected_phone, countryCode: dto.country_code, purpose: '실통화 시험', clientInfo: describeRequest(req) });
   }
 
   /** The server-side check a customer's server would do (here with the customer's own key, without consuming). */

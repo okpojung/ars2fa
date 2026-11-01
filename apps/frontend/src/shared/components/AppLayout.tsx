@@ -42,7 +42,8 @@ export function AppLayout() {
         { key: '/console/api-keys', icon: <KeyOutlined />, label: <Link to="/console/api-keys">API Key</Link> },
         { key: '/console/sessions', icon: <ApiOutlined />, label: <Link to="/console/sessions">인증 내역</Link> },
         { key: '/console/test', icon: <PhoneOutlined />, label: <Link to="/console/test">ARS 실통화 시험</Link> },
-        { key: '/docs', icon: <BarChartOutlined />, label: <Link to="/docs">개발자 가이드</Link> },
+        { key: '/console/settings', icon: <SettingOutlined />, label: <Link to="/console/settings">ARS 설정</Link> },
+        { key: '/console/docs', icon: <BarChartOutlined />, label: <Link to="/console/docs">개발자 가이드</Link> },
       ];
 
   return (

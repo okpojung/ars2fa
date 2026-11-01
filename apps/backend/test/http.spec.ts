@@ -221,6 +221,44 @@ test('customer console live test: own approved app, popup, own verification', as
   expect(v.body).toMatchObject({ verified: true, phone: '01097111104' });
   expect((await request(srv).get('/api/console/sessions').set(auth).expect(200)).body).toHaveLength(1);
 });
+test('customer ARS settings apply to new sessions; client info of browser and phone is collected', async () => {
+  const srv = app.getHttpServer();
+  await app.get(NumberPoolService).importInventory(numbers(10), LINES);
+  const email = `cs${Date.now()}@ex.com`;
+  await request(srv).post('/api/auth/signup').send({ email, password: 'Abcd123!', companyName: 'Co', contactName: 'N', contactPhone: '01000000000' }).expect(201);
+  const auth = { Authorization: `Bearer ${(await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' })).body.accessToken}` };
+  await request(srv).patch('/api/console/ars-settings').set(auth).send({ pcCodeSeconds: 5 }).expect(400);          // below the customer range
+  await request(srv).patch('/api/console/ars-settings').set(auth).send({ cooldownSeconds: 5 }).expect(400);        // not a customer setting
+  const set = await request(srv).patch('/api/console/ars-settings').set(auth).send({ pcCodeSeconds: 30, pcCodeDigits: 6, leaseSecondsPc: 60 }).expect(200);
+  expect(set.body.effective).toMatchObject({ pcCodeSeconds: 30, pcCodeDigits: 6, leaseSecondsPc: 60 });
+  const created = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'S', usagePurpose: 'x', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'A', platform: 'ANDROID', packageName: 'a.b' }] }).expect(201);
+  await prisma.apiApplication.update({ where: { id: created.body.id }, data: { status: 'APPROVED' } });
+  await prisma.applicationApp.updateMany({ where: { applicationId: created.body.id }, data: { status: 'APPROVED' } });
+  await prisma.apiKey.create({ data: { applicationId: created.body.id, keyPrefix: 'x', keyHash: 'k2-' + Date.now(), status: 'ACTIVE', monthlyLimit: 100 } });
+  const appId = (await request(srv).get('/api/console/test/apps').set(auth)).body[0].id;
+  const pcUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+  const st = await request(srv).post('/api/console/test/popup').set(auth).set('User-Agent', pcUa).set('Origin', 'https://ars2fa.baro.me')
+    .send({ appId, country_code: '82', expected_phone: '01097111104' }).expect(201);
+  let s = await prisma.arsSession.findUniqueOrThrow({ where: { sessionId: st.body.session_id } });
+  expect(s.pcCodeSeconds).toBe(30);
+  expect(s.pcCode).toMatch(/^[0-9]{6}$/);
+  expect(s.expiresAt.getTime() - s.createdAt.getTime()).toBeGreaterThan(55_000);
+  expect(s.pcClient).toMatchObject({ browser: 'Chrome 141', os: 'Windows 10/11', device: 'Windows PC' });
+  // the phone opens the QR page
+  const phoneUa = 'Mozilla/5.0 (Linux; Android 14; SM-S918N Build/UP1A) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36';
+  await request(srv).get(`/api/public/ars/dial/${s.dialToken}`).set('User-Agent', phoneUa).expect(200);
+  await request(srv).post(`/api/public/ars/dial/${s.dialToken}/device`).set('User-Agent', phoneUa).send({ screen: '412x915', tz: 'Asia/Seoul' }).expect(204);
+  s = await prisma.arsSession.findUniqueOrThrow({ where: { sessionId: st.body.session_id } });
+  expect(s.mobileClient).toMatchObject({ device: 'Samsung SM-S918N', browser: '삼성 인터넷 25', os: 'Android 14', screen: '412x915', tz: 'Asia/Seoul', deviceType: 'mobile' });
+  // PBX sees the customer's code length and time
+  await request(srv).post('/internal/authlog').set('X-Internal-Key', KEY).send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: 'cs1' }).expect(200);
+  const con = await request(srv).post('/internal/pbx/connect').type('form').send({ rn: s.rn, caller: '01097111104', uid: 'cs.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
+  expect(con.text).toBe('PC:6:24');
+  await request(srv).post('/internal/pbx/code').type('form').send({ uid: 'cs.1', code: s.pcCode, key: KEY }).expect(200);
+  const v = await request(srv).post('/api/console/test/verify').set(auth).send({ session_id: s.sessionId }).expect(201);
+  expect(v.body.clients.phone).toMatchObject({ device: 'Samsung SM-S918N' });
+  expect(v.body.clients.requester).not.toHaveProperty('ua');
+});
 test('internal endpoints require the internal key', async () => {
   await request(app.getHttpServer()).post('/internal/authlog').send({ vn: '050700952000', callStartTime: '2026-10-21 10:00:00', callId: '1' }).expect(403);
   await request(app.getHttpServer()).post('/internal/pbx/verify').set('X-Internal-Key', 'x'.repeat(40)).send({ rn: LINES[0], uid: 'u' }).expect(403);

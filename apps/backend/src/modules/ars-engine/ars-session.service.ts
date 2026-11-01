@@ -6,6 +6,7 @@ import { ArsSettingsService } from './ars-settings.service';
 import { IntegrityInput, IntegrityService } from './integrity/integrity.service';
 import { LeasedNumber, NumberPoolService } from './number-pool.service';
 import { CarrierService } from './carrier.service';
+import { ClientInfo } from './client-info.util';
 import { isHiddenCaller, isKrMobile, maskPhone, normalizeKrPhone, openText, phoneHash, sealText, valueHash } from './phone.util';
 import { VerifiedClient } from './api-key-auth.service';
 
@@ -85,7 +86,9 @@ export class ArsSessionService {
   async create(client: VerifiedClient, body: IntegrityInput & {
     mode?: ArsSessionMode; appsid?: string; purpose?: string; expected_phone?: string; country_code?: string;
   }): Promise<CreateSessionResult> {
-    const s = await this.settings.get();
+    // system settings with the customer's own ARS settings applied
+    const owner = await this.prisma.apiApplication.findUnique({ where: { id: client.app.applicationId }, select: { user: { select: { arsSettings: true } } } });
+    const s = await this.settings.forCustomer(owner?.user.arsSettings);
     const mode: ArsSessionMode = body.mode === 'PC' ? 'PC' : 'APP';
     let expectedHash: string | null = null;
     const cc = (body.country_code ?? '82').replace(/\D/g, '');
@@ -114,7 +117,7 @@ export class ArsSessionService {
         sessionId, apiKeyId: client.apiKeyId, applicationAppId: client.app.id, mobileAppName: client.app.mobileAppName,
         displayName: client.app.displayName || client.app.mobileAppName, clientPlatform: client.app.platform, mode,
         appsid: body.appsid?.slice(0, 100), purpose: body.purpose ?? null, vnId: leased.vnId, vn: leased.vn, rn: leased.rn,
-        expectedPhoneHash: expectedHash, pcCode, dialToken,
+        expectedPhoneHash: expectedHash, pcCode, dialToken, pcCodeSeconds: mode === 'PC' ? s.pcCodeSeconds : null,
         // press-1 after the notice: the customer's per-app choice, otherwise the system default
         confirmKey: mode === 'APP' ? (client.app.confirmKeyRequired ?? s.confirmKeyRequired) : false,
         integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
@@ -156,7 +159,7 @@ export class ArsSessionService {
       server_time: new Date().toISOString(),
     };
     // PC mode: once the call is connected the PC shows the code to key in on the phone, with its deadline
-    if (s.mode === 'PC' && s.status === 'CALL_CONFIRMED') Object.assign(out, { pc_code: s.pcCode, code_expires_at: s.codeExpiresAt?.toISOString() ?? null, code_seconds: (await this.settings.get()).pcCodeSeconds });
+    if (s.mode === 'PC' && s.status === 'CALL_CONFIRMED') Object.assign(out, { pc_code: s.pcCode, code_expires_at: s.codeExpiresAt?.toISOString() ?? null, code_seconds: s.pcCodeSeconds ?? (await this.settings.get()).pcCodeSeconds });
     if (s.status === 'VERIFIED' && s.callerPhoneEnc) out.phone = openText(s.callerPhoneEnc);
     return out;
   }
@@ -166,6 +169,24 @@ export class ArsSessionService {
     if (s.status !== 'PENDING' && s.status !== 'CALL_CONFIRMED') throw new ConflictException('SESSION_NOT_ACTIVE');
     await this.finish(s, 'CANCELED', 'canceled_by_client');
     return this.status(client, sessionId);
+  }
+
+  /** Browser / app that started the authentication. */
+  async attachStarter(sessionId: string, info: ClientInfo) {
+    await this.prisma.arsSession.update({ where: { sessionId }, data: { pcClient: info as Prisma.InputJsonValue } }).catch(() => undefined);
+  }
+
+  /** Phone that opened the QR page: first visit from the request, extras reported by the page merged in. */
+  async recordMobile(token: string, info: ClientInfo, reported?: Partial<ClientInfo>) {
+    if (!token || !/^[A-Za-z0-9_-]{20,40}$/.test(token)) return;
+    const s = await this.prisma.arsSession.findUnique({ where: { dialToken: token }, select: { id: true, mobileClient: true } });
+    if (!s) return;
+    const prev = (s.mobileClient ?? null) as ClientInfo | null;
+    if (prev && !reported) return; // keep the first visit
+    const merged: ClientInfo = { ...(prev ?? info), ...(reported ?? {}) };
+    // Chrome hides the model in the UA ("K"); the page reports it through UA client hints
+    if (reported?.model && (!merged.device || merged.device === 'Android' || merged.device === 'K')) merged.device = reported.model;
+    await this.prisma.arsSession.update({ where: { id: s.id }, data: { mobileClient: merged as Prisma.InputJsonValue } });
   }
 
   /** Mobile dial page (QR, PC mode): call button while the window is open. Public, addressed by an unguessable one-time token. */
@@ -334,12 +355,13 @@ export class ArsSessionService {
     await this.pool.scheduleUnlink(session.vnId, this.now());
     this.pool.unlinkNow(session.vnId, this.carrier);
     if (session.mode === 'PC' && session.pcCode) {
-      const codeExpiresAt = new Date(this.now().getTime() + s.pcCodeSeconds * 1000);
+      const codeSec = session.pcCodeSeconds ?? s.pcCodeSeconds;
+      const codeExpiresAt = new Date(this.now().getTime() + codeSec * 1000);
       const moved = await this.transition(session, 'CALL_CONFIRMED', null, callData, { expiresAt: new Date(codeExpiresAt.getTime() + 10_000), codeExpiresAt });
       if (!moved) return { result: 'FAIL', reason: 'second_call', sessionId: session.sessionId };
       await this.event(session.id, 'CALL_CONNECTED', { mode: 'PC' });
       // Read() waits this long after the guidance prompt (digits can also be keyed in during the prompt)
-      return { result: 'OK', mode: 'PC', digits: session.pcCode.length, readTimeout: Math.max(5, s.pcCodeSeconds - PC_GUIDE_SECONDS), sessionId: session.sessionId };
+      return { result: 'OK', mode: 'PC', digits: session.pcCode.length, readTimeout: Math.max(5, codeSec - PC_GUIDE_SECONDS), sessionId: session.sessionId };
     }
     return { result: 'OK', mode: 'APP', confirm: session.confirmKey, sessionId: session.sessionId };
   }
