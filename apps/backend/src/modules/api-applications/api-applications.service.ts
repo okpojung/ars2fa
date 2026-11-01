@@ -1,3 +1,4 @@
+import { parseOrigins } from '../ars-engine/widget.service';
 import {
   ForbiddenException,
   Injectable,
@@ -9,6 +10,11 @@ import {
   CreateApplicationDto,
   UpdateApplicationDto,
 } from './api-applications.dto';
+
+/** WEB apps: normalized allowed origins; app integrity checks do not apply to web sites. */
+function webFields(app: { platform: string; allowedOrigins?: string }) {
+  return app.platform === 'WEB' ? { allowedOrigins: parseOrigins(app.allowedOrigins).join(',') || null, integrityPolicy: 'OFF' as const } : {};
+}
 
 @Injectable()
 export class ApiApplicationsService {
@@ -52,6 +58,7 @@ export class ApiApplicationsService {
             packageName: app.packageName,
             bundleId: app.bundleId,
             storeUrl: app.storeUrl,
+            ...webFields(app),
           })),
         },
       },
@@ -84,6 +91,7 @@ export class ApiApplicationsService {
               packageName: app.packageName,
               bundleId: app.bundleId,
               storeUrl: app.storeUrl,
+              ...webFields(app),
             })),
           },
         },

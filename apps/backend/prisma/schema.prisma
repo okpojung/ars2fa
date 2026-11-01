@@ -33,6 +33,7 @@ enum ApplicationStatus {
 enum AppPlatform {
   ANDROID
   IOS
+  WEB // web site using the popup widget (widget.js + site key)
 }
 
 enum AppStatus {
@@ -185,6 +186,9 @@ model ApplicationApp {
   integrityPolicy IntegrityPolicy @default(MONITOR)
   // APP mode: caller must press 1 after the notice. null = system default (ARS settings). Set by the customer.
   confirmKeyRequired Boolean?
+  // WEB: public site key for widget.js and the origins allowed to use it (comma separated, e.g. https://lee.baro.me)
+  siteKey        String?         @unique
+  allowedOrigins String?
   // Android: SHA-256 of the signing certificate as reported by Play Integrity (base64url, comma separated)
   androidCertSha256 String?
   // iOS: Apple developer Team ID used in the App Attest App ID (teamId.bundleId)
@@ -389,6 +393,9 @@ model ArsSession {
   pcCode             String?          // PC mode: code shown on the PC after the call connects, keyed in on the phone; cleared when finished
   dialToken          String?          @unique // PC mode: one-time token of the mobile dial page (QR)
   codeExpiresAt      DateTime?        // PC mode: deadline for keying in the code
+  widgetToken        String?          @unique // web widget: one-time token of the popup page
+  widgetOrigin       String?          // web widget: page origin the result is posted back to
+  widgetConsumedAt   DateTime?        // web widget: result consumed by the customer server (one use)
   pcCodeAttempts     Int              @default(0)
   confirmKey         Boolean          @default(true) // APP mode: press-1 required (app setting or system default at creation)
   integrityVerdict   IntegrityVerdict @default(NOT_PROVIDED)

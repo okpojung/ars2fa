@@ -18,6 +18,7 @@ import {
 } from './ars-engine.dto';
 import { IntegrityService } from './integrity/integrity.service';
 import { NumberPoolService } from './number-pool.service';
+import { WidgetService } from './widget.service';
 
 function identity(dto: ClientDto, req: Request): ClientIdentity {
   const auth = req.header('authorization');
@@ -159,7 +160,7 @@ export class ArsInternalController {
 @Controller('api/admin/ars')
 export class ArsAdminController {
   constructor(private readonly pool: NumberPoolService, private readonly settings: ArsSettingsService, private readonly prisma: PrismaService,
-    private readonly sessionsSvc: ArsSessionService) {}
+    private readonly sessionsSvc: ArsSessionService, private readonly widget: WidgetService) {}
 
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Get('pool/summary')
@@ -253,6 +254,26 @@ export class ArsAdminController {
     const c = await this.testClient();
     return this.sessionsSvc.create(c, { mode: dto?.mode === 'PC' ? 'PC' : 'APP', purpose: '관리자 시험', expected_phone: dto?.expected_phone || undefined,
       country_code: dto?.country_code || undefined });
+  }
+
+  /** Admin console demo of the web widget: a WEB app under the built-in test application (allowed: this site). */
+  @Roles('OPERATOR', 'SUPER_ADMIN')
+  @Get('test/widget-site')
+  async testWidgetSite() {
+    const c = await this.testClient();
+    const origins = ['https://ars2fa.baro.me', 'https://192.168.94.180:9446'].join(',');
+    let web = await this.prisma.applicationApp.findFirst({ where: { applicationId: c.app.applicationId, platform: 'WEB' } });
+    if (!web) web = await this.prisma.applicationApp.create({ data: { applicationId: c.app.applicationId, mobileAppName: 'ARS2FA-WIDGET-TEST', displayName: 'ars2fa 위젯 시험',
+      platform: 'WEB', status: 'APPROVED', integrityPolicy: 'OFF', allowedOrigins: origins, siteKey: `pk_${randomBytes(18).toString('base64url')}` } });
+    return { siteKey: web.siteKey };
+  }
+
+  /** Admin demo: the server-side check a customer does with its secret key (here: the test application's key). */
+  @Roles('OPERATOR', 'SUPER_ADMIN')
+  @Post('test/widget-verify')
+  async testWidgetVerify(@Body() dto: { session_id?: string; consume?: boolean }) {
+    const c = await this.testClient();
+    return this.widget.verifyForKey(c.apiKeyId, String(dto?.session_id ?? ''), dto?.consume === true);
   }
 
   @Roles('OPERATOR', 'SUPER_ADMIN')

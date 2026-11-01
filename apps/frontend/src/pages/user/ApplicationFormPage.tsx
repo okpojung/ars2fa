@@ -10,7 +10,8 @@ export function ApplicationFormPage() {
     usagePurpose: string;
     expectedMonthlyRequests: number;
     mobileAppName: string;
-    platform: 'ANDROID' | 'IOS';
+    platform: 'ANDROID' | 'IOS' | 'WEB';
+    allowedOrigins?: string;
     packageName?: string;
     bundleId?: string;
     storeUrl?: string;
@@ -27,6 +28,7 @@ export function ApplicationFormPage() {
             packageName: values.packageName,
             bundleId: values.bundleId,
             storeUrl: values.storeUrl,
+            allowedOrigins: values.platform === 'WEB' ? values.allowedOrigins : undefined,
           },
         ],
       });
@@ -51,11 +53,19 @@ export function ApplicationFormPage() {
         <Form.Item name="expectedMonthlyRequests" label="예상 월 요청 수" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item name="mobileAppName" label="모바일 앱 명칭" rules={[{ required: true }]}>
+        <Form.Item name="mobileAppName" label="앱(또는 웹사이트) 이름" rules={[{ required: true }]} extra="인증 안내와 팝업에 표시되는 이름입니다.">
           <Input />
         </Form.Item>
         <Form.Item name="platform" label="플랫폼" rules={[{ required: true }]}>
-          <Select options={[{ value: 'ANDROID' }, { value: 'IOS' }]} />
+          <Select options={[{ value: 'ANDROID', label: 'Android 앱' }, { value: 'IOS', label: 'iOS 앱' }, { value: 'WEB', label: '웹사이트 (팝업 위젯)' }]} />
+        </Form.Item>
+        <Form.Item noStyle shouldUpdate={(a, b) => a.platform !== b.platform}>
+          {({ getFieldValue }) => getFieldValue('platform') === 'WEB' ? (
+            <Form.Item name="allowedOrigins" label="위젯을 쓸 사이트 주소" rules={[{ required: true, message: '사이트 주소를 입력하세요.' }]}
+              extra="https:// 로 시작하는 주소, 여러 개는 쉼표로 (예: https://www.example.com, https://example.com)">
+              <Input placeholder="https://www.example.com" />
+            </Form.Item>
+          ) : null}
         </Form.Item>
         <Form.Item name="packageName" label="Android 패키지명">
           <Input />

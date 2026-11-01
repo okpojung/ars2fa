@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
@@ -6,11 +6,15 @@ import { generateApiKey, getKeyPrefix, hmacSha256 } from '../../common/crypto.ut
 import { RedisService } from '../../common/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ArsSettingsService } from './ars-settings.service';
+import { parseOrigins } from './widget.service';
+import { randomBytes } from 'crypto';
 
 export class AppSettingsDto {
   /** true = press 1 required, false = not required, null = follow the service default */
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsBoolean() confirmKeyRequired?: boolean | null;
   @IsOptional() @IsString() @MaxLength(40) displayName?: string;
+  /** WEB: origins allowed to use the widget (comma separated) */
+  @IsOptional() @IsString() @MaxLength(1000) allowedOrigins?: string;
 }
 
 /** Customer console (logged-in API customers): own authentication history, per-app settings, key reissue. */
@@ -51,14 +55,33 @@ export class CustomerConsoleController {
     const userId = this.userId(req);
     const app = await this.prisma.applicationApp.findFirst({ where: { id: appId, application: { userId } } });
     if (!app) throw new NotFoundException('APP_NOT_FOUND');
-    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null } = {};
+    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null; allowedOrigins?: string | null } = {};
+    if (dto.allowedOrigins !== undefined) {
+      if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
+      const list = parseOrigins(dto.allowedOrigins);
+      if (dto.allowedOrigins.trim() && !list.length) throw new BadRequestException('INVALID_ORIGINS');
+      data.allowedOrigins = list.join(',') || null;
+    }
     if (dto.confirmKeyRequired !== undefined) data.confirmKeyRequired = dto.confirmKeyRequired;
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     const updated = await this.prisma.applicationApp.update({ where: { id: app.id }, data,
-      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, integrityPolicy: true, status: true } });
+      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, integrityPolicy: true, status: true, allowedOrigins: true, siteKey: true } });
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'APP_SETTINGS_UPDATE', targetType: 'APPLICATION_APP', targetId: app.id,
       details: { before: { confirmKeyRequired: app.confirmKeyRequired, displayName: app.displayName }, after: data } as never } });
     return updated;
+  }
+
+  /** WEB apps: issue (or reissue) the public site key used by widget.js. The old key stops working at once. */
+  @Post('apps/:appId/site-key')
+  async siteKey(@Req() req: AuthenticatedRequest, @Param('appId') appId: string) {
+    const userId = this.userId(req);
+    const app = await this.prisma.applicationApp.findFirst({ where: { id: appId, application: { userId } } });
+    if (!app) throw new NotFoundException('APP_NOT_FOUND');
+    if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
+    const siteKey = `pk_${randomBytes(18).toString('base64url')}`;
+    await this.prisma.applicationApp.update({ where: { id: app.id }, data: { siteKey } });
+    await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'SITE_KEY_ISSUE', targetType: 'APPLICATION_APP', targetId: app.id, details: { prefix: siteKey.slice(0, 10) } } });
+    return { id: app.id, siteKey };
   }
 
   /**

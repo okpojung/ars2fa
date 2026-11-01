@@ -63,6 +63,27 @@ const CREATE_PC = `POST ${BASE}/v1/ars/sessions
 // 전화가 연결되면 status 응답에 인증번호가 생깁니다
 { "status": "CALL_CONFIRMED", "pc_code": "4821", "code_expires_at": "...", "code_seconds": 15, "server_time": "..." }`;
 
+const WIDGET = `<script src="${BASE}/widget.js"></script>
+
+<form method="post" action="/contact">
+  <div id="phone-auth"></div>
+  <button id="send" type="submit" disabled>보내기</button>
+</form>
+<script>
+  ARS2FA.render('#phone-auth', {
+    siteKey: 'pk_...',
+    onVerified: function (r) { document.getElementById('send').disabled = false; }
+  });
+  // 이미 있는 입력란을 쓸 때 (버튼 click 안에서):
+  // ARS2FA.verify({ siteKey: 'pk_...', phone: '010-1234-5678' }).then(function (r) { ... r.sessionId ... });
+</script>`;
+
+const WIDGET_VERIFY = `POST ${BASE}/v1/widget/verify
+Authorization: Bearer <비밀 API Key>
+{ "session_id": "<ars2fa_session>", "consume": true }
+
+200 OK
+{ "verified": true, "phone": "01012345678", "phone_masked": "010****5678", "verified_at": "...", "origin": "https://www.example.com" }`;
 const FLUTTER = `# pubspec.yaml
 dependencies:
   ars_login:
@@ -133,6 +154,19 @@ export function DocsPage() {
           <li>입력한 휴대폰이 아닌 번호로 걸면 <code>phone_mismatch</code>로 실패합니다.</li>
         </ul>
 
+        <h2 id="web-widget">3-1. 웹 위젯 (팝업, 개발 언어 무관)</h2>
+        <p>
+          웹사이트의 가입·문의 폼에 <b>스크립트 한 줄</b>로 붙입니다. [휴대폰 인증]을 누르면 팝업 창에서 QR → 전화 → 인증번호 입력 → 결과까지 진행되고,
+          인증되면 폼에 <code>ars2fa_session</code> 값이 채워집니다. 콘솔에서 앱 종류를 <b>웹사이트</b>로 신청하고 허용 사이트 주소를 등록한 뒤 <b>사이트 키</b>(공개용 <code>pk_…</code>)를 발급받으세요.
+        </p>
+        <pre><code>{WIDGET}</code></pre>
+        <p><b>서버에서 반드시 확인</b>하세요. 브라우저가 보낸 값만 믿으면 우회될 수 있습니다.</p>
+        <pre><code>{WIDGET_VERIFY}</code></pre>
+        <ul>
+          <li>사이트 키는 등록한 주소의 페이지에서만 동작하고, IP·번호·사이트별 요청 횟수 제한이 걸립니다.</li>
+          <li><code>consume: true</code> 로 확인하면 같은 인증을 두 번 쓸 수 없습니다(가입 1건·문의 1건).</li>
+          <li>팝업 차단을 피하려면 <code>ARS2FA.verify()</code>는 버튼 click 처리 안에서 바로 호출하세요.</li>
+        </ul>
         <h2>4. 실패 사유</h2>
         <table>
           <thead><tr><th>fail_reason</th><th>의미</th></tr></thead>

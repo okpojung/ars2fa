@@ -4,14 +4,10 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { corsDelegate } from './common/cors';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    cors: {
-      origin: process.env.APP_URL ?? 'http://localhost:5173',
-      credentials: true,
-    },
-  });
+  const app = await NestFactory.create(AppModule, { cors: corsDelegate });
 
   app.use(cookieParser());
   app.useGlobalPipes(

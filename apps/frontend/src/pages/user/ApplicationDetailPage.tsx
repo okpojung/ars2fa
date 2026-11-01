@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiClient } from '../../shared/api/client';
 import { RotateKeyButton } from './RotateKeyButton';
+import { WebWidgetSettings } from './WebWidgetSettings';
 
 export const APPLICATION_STATUS: Record<string, string> = {
   DRAFT: '작성 중', SUBMITTED: '심사 중', NEEDS_REVISION: '보완 요청', APPROVED: '승인', REJECTED: '반려', PENDING: '심사 대기', SUSPENDED: '정지',
@@ -56,9 +57,10 @@ export function ApplicationDetailPage() {
           columns={[
             { title: '앱', render: (_, a) => <><b>{a.mobileAppName}</b> <Tag>{a.platform}</Tag><br /><Typography.Text type="secondary">{a.packageName ?? a.bundleId ?? ''}</Typography.Text></> },
             { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'APPROVED' ? 'green' : undefined}>{APPLICATION_STATUS[v] ?? v}</Tag> },
-            { title: '앱 위조 방지', dataIndex: 'integrityPolicy', render: (v) => ({ OFF: '사용 안 함', MONITOR: '기록만', ENFORCE: '차단' } as Record<string, string>)[v] ?? v },
+            { title: '앱 위조 방지', dataIndex: 'integrityPolicy', render: (v, a) => a.platform === 'WEB' ? '-' : ({ OFF: '사용 안 함', MONITOR: '기록만', ENFORCE: '차단' } as Record<string, string>)[v] ?? v },
             { title: '설정', render: (_, a) => <AppSettings app={a} defaultConfirm={defaults?.confirmKeyRequired} /> },
-          ]} />
+          ]} expandable={{ rowExpandable: (a) => a.platform === 'WEB', defaultExpandAllRows: true,
+            expandedRowRender: (a) => <WebWidgetSettings app={a} /> }} />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
           1번 누르기: 통화 첫머리의 피싱 방지 안내 뒤 1번을 눌러야 인증됩니다. 끄면 안내 없이 바로 인증합니다.
           앱 인증에만 적용되며, PC 인증은 화면의 숫자를 휴대폰으로 누르는 방식입니다.

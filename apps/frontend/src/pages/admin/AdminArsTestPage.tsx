@@ -1,8 +1,9 @@
-import { Alert, Button, Card, Input, Progress, QRCode, Radio, Result, Select, Space, Statistic, Typography, message } from 'antd';
+import { Alert, Button, Card, Tabs, Input, Progress, QRCode, Radio, Result, Select, Space, Statistic, Typography, message } from 'antd';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { apiClient } from '../../shared/api/client';
 import { FAIL_REASON_LABEL } from './AdminDashboardPage';
+import { WidgetDemo } from './WidgetDemo';
 
 const PREFIXES = ['010', '011', '016', '017', '018', '019'];
 
@@ -58,6 +59,8 @@ export function AdminArsTestPage() {
   return (
     <>
       <Typography.Title level={2}>ARS 실통화 시험</Typography.Title>
+      <Tabs defaultActiveKey="direct" items={[
+        { key: 'direct', label: '직접 시험 (앱 / PC)', children: <>
       <Card style={{ marginBottom: 16 }}>
         <Space direction="vertical" size="middle">
           <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}
@@ -117,6 +120,9 @@ export function AdminArsTestPage() {
           {st === 'PENDING' && callLeft === 0 && <Alert type="info" showIcon message="전화 걸 시간이 지났습니다. 잠시 후 결과가 표시됩니다." />}
         </Card>
       )}
+        </> },
+        { key: 'widget', label: '웹 위젯 예제 (문의하기 팝업)', children: <WidgetDemo /> },
+      ]} />
     </>
   );
 }

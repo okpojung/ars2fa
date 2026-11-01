@@ -29,6 +29,11 @@ export class ApplicationAppDto {
   @IsOptional()
   @IsString()
   storeUrl?: string;
+
+  /** WEB: origins allowed to use the widget, comma separated (https://example.com) */
+  @IsOptional()
+  @IsString()
+  allowedOrigins?: string;
 }
 
 export class CreateApplicationDto {

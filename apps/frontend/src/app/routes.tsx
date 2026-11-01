@@ -22,6 +22,7 @@ import { AdminArsSessionsPage } from '../pages/admin/AdminArsSessionsPage';
 import { AdminAppSecurityPage } from '../pages/admin/AdminAppSecurityPage';
 import { AdminArsTestPage } from '../pages/admin/AdminArsTestPage';
 import { MobileDialPage } from '../pages/public/MobileDialPage';
+import { WidgetPopupPage } from '../pages/public/WidgetPopupPage';
 
 export const router = createBrowserRouter([
   { path: '/', element: <HomePage /> },
@@ -30,6 +31,7 @@ export const router = createBrowserRouter([
   { path: '/signup', element: <SignupPage /> },
   { path: '/admin/login', element: <LoginPage admin /> },
   { path: '/m/ars/:token', element: <MobileDialPage /> },
+  { path: '/w/pc/:token', element: <WidgetPopupPage /> },
   // old customer paths
   ...['/applications', '/api-keys', '/auth-requests', '/statistics'].map((p) => ({ path: p, element: <Navigate to={p === '/auth-requests' ? '/console/sessions' : p === '/statistics' ? '/console' : `/console${p}`} replace /> })),
   {

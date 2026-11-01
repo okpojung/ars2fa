@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { corsDelegate } from '../src/common/cors';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { NumberPoolService } from '../src/modules/ars-engine/number-pool.service';
 import { ArsSessionService } from '../src/modules/ars-engine/ars-session.service';
@@ -16,6 +17,7 @@ beforeAll(async () => {
   process.env.INTERNAL_API_KEY = KEY;
   const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = mod.createNestApplication();
+  app.enableCors(corsDelegate);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   await app.init();
   prisma = app.get(PrismaService);
@@ -122,6 +124,49 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   // other customers' resources are not reachable
   await request(srv).patch(`/api/console/apps/does-not-exist/settings`).set(auth).send({ confirmKeyRequired: true }).expect(404);
 });
+test('web widget: registered origin only, popup flow, one-time server verification', async () => {
+  const srv = app.getHttpServer();
+  await app.get(NumberPoolService).importInventory(numbers(10), LINES);
+  const c = await seedClient(prisma);
+  const web = await prisma.applicationApp.create({ data: { applicationId: c.app.applicationId, mobileAppName: 'Shop', platform: 'WEB', status: 'APPROVED',
+    integrityPolicy: 'OFF', allowedOrigins: 'https://shop.example.com', siteKey: 'pk_testsitekey0123456789' } });
+  const body = { site_key: web.siteKey, country_code: '82', phone: '010-9711-1104', purpose: '문의하기' };
+  await request(srv).post('/v1/widget/sessions').send(body).expect(403);                                   // no Origin
+  await request(srv).post('/v1/widget/sessions').set('Origin', 'https://evil.example').send(body).expect(403);
+  await request(srv).post('/v1/widget/sessions').set('Origin', 'https://shop.example.com').send({ ...body, site_key: 'pk_unknownkey0123456789' }).expect(401);
+  const pre = await request(srv).options('/v1/widget/sessions').set('Origin', 'https://shop.example.com').set('Access-Control-Request-Method', 'POST');
+  expect(pre.headers['access-control-allow-origin']).toBe('https://shop.example.com');
+  const started = await request(srv).post('/v1/widget/sessions').set('Origin', 'https://shop.example.com').send(body).expect(200);
+  expect(started.body.popup_url).toMatch(/\/w\/pc\/[A-Za-z0-9_-]{24}$/);
+  expect(started.body).not.toHaveProperty('dial_number');
+  const token = String(started.body.popup_url).split('/').pop();
+  let pop = await request(srv).get(`/api/public/ars/widget/${token}`).expect(200);
+  expect(pop.body).toMatchObject({ state: 'PENDING', origin: 'https://shop.example.com' });
+  expect(pop.body.dial_page_url).toMatch(/\/m\/ars\//);
+  expect(pop.body.pc_code).toBeUndefined();
+
+  const s = await prisma.arsSession.findUniqueOrThrow({ where: { sessionId: started.body.session_id } });
+  expect(s.mode).toBe('PC');
+  await request(srv).post('/internal/authlog').set('X-Internal-Key', KEY).send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: '999' }).expect(200);
+  const con = await request(srv).post('/internal/pbx/connect').type('form').send({ rn: s.rn, caller: '01097111104', uid: 'w.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
+  expect(con.text).toMatch(/^PC:4:/);
+  pop = await request(srv).get(`/api/public/ars/widget/${token}`).expect(200);
+  expect(pop.body.state).toBe('CALL_CONFIRMED');
+  expect(pop.body.dial_page_url).toBeUndefined();
+  const code = await request(srv).post('/internal/pbx/code').type('form').send({ uid: 'w.1', code: pop.body.pc_code, key: KEY }).expect(200);
+  expect(code.text).toBe('OK');
+  pop = await request(srv).get(`/api/public/ars/widget/${token}`).expect(200);
+  expect(pop.body).toMatchObject({ state: 'VERIFIED', phone_masked: '010****1104' });
+
+  await request(srv).post('/v1/widget/verify').set('Authorization', 'Bearer wrong-key').send({ session_id: s.sessionId }).expect(401);
+  const v1 = await request(srv).post('/v1/widget/verify').set('Authorization', `Bearer ${c.key}`).send({ session_id: s.sessionId, consume: true }).expect(200);
+  expect(v1.body).toMatchObject({ verified: true, phone: '01097111104', origin: 'https://shop.example.com' });
+  const v2 = await request(srv).post('/v1/widget/verify').set('Authorization', `Bearer ${c.key}`).send({ session_id: s.sessionId, consume: true }).expect(200);
+  expect(v2.body).toMatchObject({ verified: false, reason: 'already_used' });
+  // another customer's key cannot read it
+  const other = await seedClient(prisma);
+  await request(srv).post('/v1/widget/verify').set('Authorization', `Bearer ${other.key}`).send({ session_id: s.sessionId }).expect(404);
+});
 test('internal endpoints require the internal key', async () => {
   await request(app.getHttpServer()).post('/internal/authlog').send({ vn: '050700952000', callStartTime: '2026-10-21 10:00:00', callId: '1' }).expect(403);
   await request(app.getHttpServer()).post('/internal/pbx/verify').set('X-Internal-Key', 'x'.repeat(40)).send({ rn: LINES[0], uid: 'u' }).expect(403);
@@ -131,7 +176,8 @@ test('API errors: bad key 401, unknown app 403, validation 400', async () => {
   await request(app.getHttpServer()).post('/v1/ars/sessions').send({ api_key: 'nope', mobile_app_name: 'X', client_platform: 'ANDROID' }).expect(401);
   const c = await seedClient(prisma);
   await request(app.getHttpServer()).post('/v1/ars/sessions').send({ api_key: c.key, mobile_app_name: 'Other', client_platform: 'ANDROID' }).expect(403);
-  await request(app.getHttpServer()).post('/v1/ars/sessions').send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'WEB' }).expect(400);
+  await request(app.getHttpServer()).post('/v1/ars/sessions').send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'WEB' }).expect(403); // web sites use the widget, not the app API
+  await request(app.getHttpServer()).post('/v1/ars/sessions').send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'DESKTOP' }).expect(400);
   await request(app.getHttpServer()).post('/v1/ars/sessions/status').send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'ANDROID', package_name: c.identity.package_name, session_id: 'nope' }).expect(400);
 });
 
