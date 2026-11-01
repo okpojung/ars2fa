@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ApplicationApp, Prisma } from '@prisma/client';
-import { ClientInfo } from './client-info.util';
+import { ClientInfo, geoRisk } from './client-info.util';
 
 /** Client info without the raw User-Agent string. */
 export function summarizeClient(v: unknown) {
@@ -183,6 +183,8 @@ export class WidgetService {
       origin: s.widgetOrigin, purpose: s.purpose,
       // who took part: the browser that started it and the phone that opened the QR page (for the customer's fraud checks)
       clients: { requester: summarizeClient(s.pcClient), phone: summarizeClient(s.mobileClient) },
+      // record-only signals for the customer's own decision (e.g. extra checks on country mismatch / VPN)
+      risk: geoRisk(s.pcClient, s.mobileClient),
     };
   }
 }

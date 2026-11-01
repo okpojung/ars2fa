@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { getClientIp } from '../../common/request.util';
+import { GeoInfo, geoLookup } from './geoip';
 
 export type ClientInfo = {
   ip?: string | null;
@@ -15,7 +16,22 @@ export type ClientInfo = {
   tz?: string;
   model?: string;       // Chrome UA-CH model (Android), e.g. "SM-S918N"
   platformVersion?: string;
+  geo?: GeoInfo | null; // country / network owner of the IP (DB-IP Lite)
 };
+
+/**
+ * Record-only risk signals of one authentication (nothing is blocked on them yet):
+ * country_mismatch = PC/web and phone IPs are in different countries; vpn_suspect = either IP is a data center / VPN network.
+ */
+export function geoRisk(pc?: unknown, phone?: unknown) {
+  const p = (pc ?? null) as ClientInfo | null, m = (phone ?? null) as ClientInfo | null;
+  const pcCountry = p?.geo?.country ?? null, phoneCountry = m?.geo?.country ?? null;
+  return {
+    pc_country: pcCountry, phone_country: phoneCountry,
+    country_mismatch: pcCountry && phoneCountry ? pcCountry !== phoneCountry : null,
+    vpn_suspect: !!(p?.geo?.hosting || m?.geo?.hosting),
+  };
+}
 
 const SAMSUNG = /^(SM-|SHV-|SHW-|SCH-|SGH-)/i;
 const LG = /^(LM-|LG-)/i;
@@ -62,7 +78,8 @@ export function parseUserAgent(ua?: string | null): Pick<ClientInfo, 'browser' |
 export function describeRequest(req: Request): ClientInfo {
   const ua = (req.header('user-agent') ?? '').slice(0, 400);
   const lang = (req.header('accept-language') ?? '').split(',')[0]?.slice(0, 20) || undefined;
-  return { ip: getClientIp(req) ?? null, ua, ...parseUserAgent(ua), lang, at: new Date().toISOString() };
+  const ip = getClientIp(req) ?? null;
+  return { ip, ua, ...parseUserAgent(ua), lang, geo: geoLookup(ip), at: new Date().toISOString() };
 }
 
 /** Extra fields a page may report about itself (strings only, short). */

@@ -30,6 +30,7 @@
     "class-validator": "latest",
     "cookie-parser": "latest",
     "ioredis": "latest",
+    "mmdb-lib": "^3.0.3",
     "pg": "^8.21.0",
     "pino": "latest",
     "reflect-metadata": "latest",

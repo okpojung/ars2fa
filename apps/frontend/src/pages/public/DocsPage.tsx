@@ -260,6 +260,8 @@ export function DocsPage() {
             <tr><td><code>verified_at</code>, <code>origin</code>, <code>purpose</code></td><td>인증 시각, 요청한 사이트, 목적</td></tr>
             <tr><td><code>clients.requester</code></td><td>인증을 요청한 브라우저: IP, 브라우저, 운영체제, 기기</td></tr>
             <tr><td><code>clients.phone</code></td><td>QR을 연 휴대폰: IP, 기종, 브라우저, 운영체제, 화면, 언어, 시간대</td></tr>
+            <tr><td><code>clients.*.geo</code></td><td>IP의 국가(<code>country</code>), 네트워크 소유자(<code>asn</code>, <code>org</code>), 데이터센터·VPN 망 여부(<code>hosting</code>)</td></tr>
+            <tr><td><code>risk</code></td><td>참고용 신호(현재 인증을 막지 않음): <code>country_mismatch</code> = PC와 휴대폰의 국가가 다름, <code>vpn_suspect</code> = VPN·데이터센터 IP. 고객 서버가 추가 확인 여부를 판단할 때 쓰세요.</td></tr>
           </tbody>
         </table>
 

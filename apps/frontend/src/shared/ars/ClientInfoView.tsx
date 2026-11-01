@@ -2,11 +2,32 @@ import { Descriptions, Tag, Typography } from 'antd';
 
 type Info = Record<string, any> | null | undefined;
 
+const regionNames = typeof Intl !== 'undefined' && 'DisplayNames' in Intl ? new Intl.DisplayNames(['ko'], { type: 'region' }) : null;
+/** "KR" -> "대한민국" */
+export function countryName(code?: string | null) {
+  if (!code) return '';
+  try { return regionNames?.of(code) ?? code; } catch { return code; }
+}
+
+/** IP with its country (and network owner / warnings when ull). */
+export function IpGeo({ v, full = false }: { v: Info; full?: boolean }) {
+  if (!v?.ip) return <>-</>;
+  const g = v.geo as Record<string, any> | null | undefined;
+  return (
+    <span>
+      <Typography.Text code style={{ fontSize: 12 }}>{v.ip}</Typography.Text>
+      {g?.private ? <Tag style={{ marginLeft: 6 }}>내부망</Tag> : g?.country ? <Tag color={g.country === 'KR' ? 'blue' : 'volcano'} style={{ marginLeft: 6 }}>{g.country} {full ? countryName(g.country) : ''}</Tag> : null}
+      {g?.hosting && <Tag color="red">VPN·데이터센터 의심</Tag>}
+      {full && g?.org && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{g.asn ? `AS${g.asn} ` : ''}{g.org}</Typography.Text></div>}
+    </span>
+  );
+}
+
 function Block({ title, v }: { title: string; v: Info }) {
   if (!v) return <Descriptions size="small" bordered column={1} title={title}><Descriptions.Item label="정보">없음</Descriptions.Item></Descriptions>;
   return (
     <Descriptions size="small" bordered column={1} title={title}>
-      <Descriptions.Item label="IP 주소"><Typography.Text code>{v.ip ?? '-'}</Typography.Text></Descriptions.Item>
+      <Descriptions.Item label="IP · 국가"><IpGeo v={v} full /></Descriptions.Item>
       <Descriptions.Item label="기기">{v.device ?? '-'} {v.deviceType && <Tag>{({ mobile: '휴대폰', tablet: '태블릿', desktop: 'PC' } as Record<string, string>)[v.deviceType] ?? v.deviceType}</Tag>}</Descriptions.Item>
       <Descriptions.Item label="운영체제">{v.os ?? '-'}{v.platformVersion ? ` (${v.platformVersion})` : ''}</Descriptions.Item>
       <Descriptions.Item label="브라우저">{v.browser ?? '-'}</Descriptions.Item>
