@@ -5,6 +5,7 @@ import { LoginPage } from '../pages/public/LoginPage';
 import { SignupPage } from '../pages/public/SignupPage';
 import { ConsoleDashboardPage } from '../pages/user/ConsoleDashboardPage';
 import { ConsoleSessionsPage } from '../pages/user/ConsoleSessionsPage';
+import { ConsoleTestPage } from '../pages/user/ConsoleTestPage';
 import { HomePage } from '../pages/public/HomePage';
 import { DocsPage } from '../pages/public/DocsPage';
 import { ApplicationListPage } from '../pages/user/ApplicationListPage';
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
           { path: '/console/api-keys', element: <ApiKeyListPage /> },
           { path: '/console/api-keys/:id', element: <ApiKeyDetailPage /> },
           { path: '/console/sessions', element: <ConsoleSessionsPage /> },
+          { path: '/console/test', element: <ConsoleTestPage /> },
         ],
       },
     ],

@@ -48,6 +48,6 @@ export class ArsSweeper implements OnModuleInit, OnModuleDestroy {
 @Module({
   controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController, CustomerConsoleController, WidgetController],
   providers: [ArsSessionService, NumberPoolService, ArsSettingsService, IntegrityService, ApiKeyAuthService, RedisService, CarrierService, WidgetService, ArsSweeper],
-  exports: [ArsSessionService, NumberPoolService, CarrierService],
+  exports: [ArsSessionService, NumberPoolService, CarrierService, WidgetService],
 })
 export class ArsEngineModule {}

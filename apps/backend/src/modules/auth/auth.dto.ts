@@ -30,6 +30,17 @@ export class SignupDto {
   @IsOptional()
   @IsString()
   turnstileToken?: string;
+
+  /** ARS phone check of the contact phone (required when SIGNUP_PHONE_VERIFY=on) */
+  @IsOptional()
+  @IsString()
+  phoneSessionId?: string;
+}
+
+export class SignupPhoneStartDto {
+  @IsOptional() @IsString() countryCode?: string;
+  @IsString() @IsNotEmpty() phone!: string;
+  @IsOptional() @IsString() turnstileToken?: string;
 }
 
 export class LoginDto {

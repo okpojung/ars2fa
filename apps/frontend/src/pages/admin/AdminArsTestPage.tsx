@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '../../shared/api/client';
 import { FAIL_REASON_LABEL } from './AdminDashboardPage';
 import { WidgetDemo } from './WidgetDemo';
+import { PopupPhoneTest } from '../../shared/ars/PopupPhoneTest';
 
 const PREFIXES = ['010', '011', '016', '017', '018', '019'];
 
@@ -59,8 +60,11 @@ export function AdminArsTestPage() {
   return (
     <>
       <Typography.Title level={2}>ARS 실통화 시험</Typography.Title>
-      <Tabs defaultActiveKey="direct" items={[
-        { key: 'direct', label: '직접 시험 (앱 / PC)', children: <>
+      <Tabs defaultActiveKey="popup" items={[
+        { key: 'popup', label: 'PC 인증 (팝업)', children: <PopupPhoneTest
+          start={async (b) => (await apiClient.post('/admin/ars/test/popup', b)).data}
+          verify={async (sid) => (await apiClient.post('/admin/ars/test/widget-verify', { session_id: sid, consume: false })).data} /> },
+        { key: 'direct', label: '화면 안에서 시험 (앱 / PC)', children: <>
       <Card style={{ marginBottom: 16 }}>
         <Space direction="vertical" size="middle">
           <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}

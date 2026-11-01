@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ApplicationApp } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { hmacSha256 } from '../../common/crypto.util';
 import { RedisService } from '../../common/redis.service';
@@ -49,9 +50,19 @@ export class WidgetService {
     const key = app.application.apiKeys.find((k) => k.status === 'ACTIVE' && (!k.expiresAt || k.expiresAt > new Date()));
     if (!key) throw new ForbiddenException('API_KEY_DISABLED');
 
-    // abuse limits: per browser IP and per site, plus the key's monthly limit
+    return this.startForClient({ apiKeyId: key.id, app }, { origin, ip: input.ip, phone: input.phone, countryCode: input.countryCode, purpose: input.purpose });
+  }
+
+  /**
+   * Starts a PC-mode authentication shown in the popup (/w/pc/<token>) for an already resolved client.
+   * Used by the widget, the admin/customer live tests and the ARS2FA sign-up page.
+   */
+  async startForClient(client: { apiKeyId: string; app: ApplicationApp }, input: { origin: string; ip?: string; phone: string; countryCode?: string; purpose?: string }) {
+    const key = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: client.apiKeyId } });
+    // abuse limits: per browser IP, per phone and per key, plus the key's monthly limit
     const minute = Math.floor(Date.now() / 60_000);
-    if (input.ip) {
+    const limits = process.env.WIDGET_LIMITS !== 'off'; // only the test suite turns these off
+    if (limits && input.ip) {
       const perIp = await this.redis.incrementWithTtl(`widget:ip:${input.ip}:${Math.floor(Date.now() / 600_000)}`, 1200);
       if (perIp > 8) throw new HttpException({ code: 'TOO_MANY_REQUESTS', message: '잠시 후 다시 시도해 주세요.' }, 429);
     }
@@ -63,21 +74,57 @@ export class WidgetService {
     }
     const phone = normalizeKrPhone(input.phone);
     if (!phone) throw new BadRequestException('INVALID_PHONE');
-    if (input.ip && phone) {
-      const perPhone = await this.redis.incrementWithTtl(`widget:phone:${hmacSha256('w', phone)}:${Math.floor(Date.now() / 600_000)}`, 1200);
-      if (perPhone > 5) throw new HttpException({ code: 'TOO_MANY_REQUESTS', message: '같은 번호로 너무 자주 요청했습니다. 잠시 후 다시 시도해 주세요.' }, 429);
-    }
+    const perPhone = limits ? await this.redis.incrementWithTtl(`widget:phone:${hmacSha256('w', phone)}:${Math.floor(Date.now() / 600_000)}`, 1200) : 0;
+    if (perPhone > 5) throw new HttpException({ code: 'TOO_MANY_REQUESTS', message: '같은 번호로 너무 자주 요청했습니다. 잠시 후 다시 시도해 주세요.' }, 429);
 
-    const created = await this.sessions.create({ apiKeyId: key.id, app }, {
-      mode: 'PC', expected_phone: phone, country_code: input.countryCode ?? '82', purpose: input.purpose,
-    });
+    const created = await this.sessions.create(client, { mode: 'PC', expected_phone: phone, country_code: input.countryCode ?? '82', purpose: input.purpose });
     const widgetToken = randomBytes(18).toString('base64url');
-    await this.prisma.arsSession.update({ where: { sessionId: created.session_id }, data: { widgetToken, widgetOrigin: origin } });
+    await this.prisma.arsSession.update({ where: { sessionId: created.session_id }, data: { widgetToken, widgetOrigin: input.origin } });
     await this.prisma.apiKey.update({ where: { id: key.id }, data: { lastUsedAt: new Date() } });
     const base = (process.env.PUBLIC_DIAL_BASE_URL ?? process.env.APP_URL ?? '').replace(/\/+$/, '');
     return { session_id: created.session_id, popup_url: `${base}/w/pc/${widgetToken}`, expires_at: created.expires_at, server_time: new Date().toISOString() };
   }
 
+  /** Our own page origin (fallback when the request carries none, e.g. same-origin GET-less calls). */
+  ownOrigin(origin?: string | null) {
+    return normalizeOrigin(origin) ?? normalizeOrigin(process.env.APP_URL) ?? 'https://ars2fa.baro.me';
+  }
+
+  /**
+   * Built-in apps that ARS2FA itself uses (admin live test, sign-up phone check), kept under one internal
+   * application with an internal key that is never handed out.
+   */
+  async systemClient(name: string, platform: 'ANDROID' | 'WEB', displayName: string) {
+    let user = await this.prisma.user.findUnique({ where: { email: 'admin-test@ars2fa.local' } });
+    if (!user) user = await this.prisma.user.create({ data: { email: 'admin-test@ars2fa.local', passwordHash: '!', companyName: 'ars2fa', contactName: '시스템', contactPhone: '00000000000', status: 'SUSPENDED' } });
+    let application = await this.prisma.apiApplication.findFirst({ where: { userId: user.id }, include: { apiKeys: true }, orderBy: { createdAt: 'asc' } });
+    if (!application) {
+      await this.prisma.apiApplication.create({ data: { userId: user.id, serviceName: '관리자 실통화 시험', usagePurpose: 'internal', expectedMonthlyRequests: 0, status: 'APPROVED' } });
+      application = await this.prisma.apiApplication.findFirst({ where: { userId: user.id }, include: { apiKeys: true }, orderBy: { createdAt: 'asc' } });
+    }
+    let key = application!.apiKeys.find((k) => k.status === 'ACTIVE');
+    if (!key) key = await this.prisma.apiKey.create({ data: { applicationId: application!.id, keyPrefix: 'internal', keyHash: `internal-${randomBytes(16).toString('hex')}`, status: 'ACTIVE', monthlyLimit: 100000, rateLimitPerMinute: 120 } });
+    let app = await this.prisma.applicationApp.findFirst({ where: { applicationId: application!.id, mobileAppName: name } });
+    if (!app) app = await this.prisma.applicationApp.create({ data: { applicationId: application!.id, mobileAppName: name, displayName, platform, status: 'APPROVED', integrityPolicy: 'OFF' } });
+    return { apiKeyId: key.id, app };
+  }
+
+  /**
+   * ARS2FA sign-up: the phone check must be a verified, unused session of the sign-up app, for the same phone,
+   * finished within 15 minutes. Marks it used.
+   */
+  async consumeSignupPhone(sessionId: string | undefined, contactPhone: string) {
+    const fail = (m: string) => new BadRequestException({ code: 'PHONE_NOT_VERIFIED', message: m });
+    if (!sessionId || !/^ars_[A-Za-z0-9_-]{10,40}$/.test(sessionId)) throw fail('휴대폰 인증을 완료해 주세요.');
+    const s = await this.prisma.arsSession.findUnique({ where: { sessionId }, include: { applicationApp: true } });
+    if (!s || s.applicationApp.mobileAppName !== 'ARS2FA-SIGNUP' || s.status !== 'VERIFIED' || !s.callerPhoneEnc) throw fail('휴대폰 인증을 완료해 주세요.');
+    if (!s.finishedAt || Date.now() - s.finishedAt.getTime() > 15 * 60_000) throw fail('휴대폰 인증 시간이 지났습니다. 다시 인증해 주세요.');
+    const phone = openText(s.callerPhoneEnc);
+    if (phone !== normalizeKrPhone(contactPhone)) throw fail('인증한 휴대폰 번호와 담당자 연락처가 다릅니다.');
+    const r = await this.prisma.arsSession.updateMany({ where: { id: s.id, widgetConsumedAt: null }, data: { widgetConsumedAt: new Date() } });
+    if (r.count === 0) throw fail('이미 사용한 휴대폰 인증입니다. 다시 인증해 주세요.');
+    return phone;
+  }
   /** Popup page state (public, addressed by the one-time widget token). */
   async popup(token: string) {
     const s = token && /^[A-Za-z0-9_-]{20,40}$/.test(token) ? await this.prisma.arsSession.findUnique({ where: { widgetToken: token } }) : null;

@@ -15,6 +15,7 @@ let prisma: PrismaService;
 
 beforeAll(async () => {
   process.env.INTERNAL_API_KEY = KEY;
+  process.env.WIDGET_LIMITS = 'off';
   const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = mod.createNestApplication();
   app.enableCors(corsDelegate);
@@ -166,6 +167,59 @@ test('web widget: registered origin only, popup flow, one-time server verificati
   // another customer's key cannot read it
   const other = await seedClient(prisma);
   await request(srv).post('/v1/widget/verify').set('Authorization', `Bearer ${other.key}`).send({ session_id: s.sessionId }).expect(404);
+});
+/** Runs the PBX side of a PC-mode call for a session: AuthLog -> connect -> code shown -> keyed in. */
+async function completePcCall(sessionId: string, phone: string, uid: string, rightCode = true) {
+  const srv = app.getHttpServer();
+  const s = await prisma.arsSession.findUniqueOrThrow({ where: { sessionId } });
+  await request(srv).post('/internal/authlog').set('X-Internal-Key', KEY).send({ vn: s.vn, an: phone, callStartTime: kst(new Date()), callId: `c-${uid}` }).expect(200);
+  await request(srv).post('/internal/pbx/connect').type('form').send({ rn: s.rn, caller: phone, uid, t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
+  const code = (await prisma.arsSession.findUniqueOrThrow({ where: { sessionId } })).pcCode!;
+  await request(srv).post('/internal/pbx/code').type('form').send({ uid, code: rightCode ? code : '0000', key: KEY }).expect(200);
+}
+
+test('sign-up with ARS phone check: verified, same phone, one use', async () => {
+  const srv = app.getHttpServer();
+  await app.get(NumberPoolService).importInventory(numbers(10), LINES);
+  process.env.SIGNUP_PHONE_VERIFY = 'on';
+  try {
+    expect((await request(srv).get('/api/auth/config').expect(200)).body.phoneVerify).toBe(true);
+    const st = await request(srv).post('/api/auth/phone/start').set('Origin', 'https://ars2fa.baro.me').send({ countryCode: '82', phone: '01097111104' }).expect(200);
+    expect(st.body.popup_url).toMatch(/\/w\/pc\//);
+    const base = { password: 'Abcd123!', companyName: 'Co', contactName: 'N' };
+    // not verified yet
+    await request(srv).post('/api/auth/signup').send({ ...base, email: `a${Date.now()}@ex.com`, contactPhone: '01097111104', phoneSessionId: st.body.session_id }).expect(400);
+    await completePcCall(st.body.session_id, '01097111104', 'su.1');
+    // other phone than the verified one
+    await request(srv).post('/api/auth/signup').send({ ...base, email: `b${Date.now()}@ex.com`, contactPhone: '01011112222', phoneSessionId: st.body.session_id }).expect(400);
+    await request(srv).post('/api/auth/signup').send({ ...base, email: `c${Date.now()}@ex.com`, contactPhone: '010-9711-1104', phoneSessionId: st.body.session_id }).expect(201);
+    // one use only
+    await request(srv).post('/api/auth/signup').send({ ...base, email: `d${Date.now()}@ex.com`, contactPhone: '01097111104', phoneSessionId: st.body.session_id }).expect(400);
+    // a session of another app cannot be used for sign-up
+    await request(srv).post('/api/auth/signup').send({ ...base, email: `e${Date.now()}@ex.com`, contactPhone: '01097111104' }).expect(400);
+  } finally {
+    delete process.env.SIGNUP_PHONE_VERIFY;
+  }
+});
+
+test('customer console live test: own approved app, popup, own verification', async () => {
+  const srv = app.getHttpServer();
+  await app.get(NumberPoolService).importInventory(numbers(10), LINES);
+  const email = `t${Date.now()}@ex.com`;
+  await request(srv).post('/api/auth/signup').send({ email, password: 'Abcd123!', companyName: 'Co', contactName: 'N', contactPhone: '01000000000' }).expect(201);
+  const auth = { Authorization: `Bearer ${(await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' })).body.accessToken}` };
+  expect((await request(srv).get('/api/console/test/apps').set(auth).expect(200)).body).toEqual([]);
+  const created = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Svc', usagePurpose: 'x', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'A', platform: 'ANDROID', packageName: 'a.b' }] }).expect(201);
+  await prisma.apiApplication.update({ where: { id: created.body.id }, data: { status: 'APPROVED' } });
+  await prisma.applicationApp.updateMany({ where: { applicationId: created.body.id }, data: { status: 'APPROVED' } });
+  await prisma.apiKey.create({ data: { applicationId: created.body.id, keyPrefix: 'x', keyHash: 'k-' + Date.now(), status: 'ACTIVE', monthlyLimit: 100 } });
+  const apps = (await request(srv).get('/api/console/test/apps').set(auth).expect(200)).body;
+  expect(apps).toHaveLength(1);
+  const st = await request(srv).post('/api/console/test/popup').set(auth).set('Origin', 'https://ars2fa.baro.me').send({ appId: apps[0].id, country_code: '82', expected_phone: '01097111104' }).expect(201);
+  await completePcCall(st.body.session_id, '01097111104', 'ct.1');
+  const v = await request(srv).post('/api/console/test/verify').set(auth).send({ session_id: st.body.session_id }).expect(201);
+  expect(v.body).toMatchObject({ verified: true, phone: '01097111104' });
+  expect((await request(srv).get('/api/console/sessions').set(auth).expect(200)).body).toHaveLength(1);
 });
 test('internal endpoints require the internal key', async () => {
   await request(app.getHttpServer()).post('/internal/authlog').send({ vn: '050700952000', callStartTime: '2026-10-21 10:00:00', callId: '1' }).expect(403);

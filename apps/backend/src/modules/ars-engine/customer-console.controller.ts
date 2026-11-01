@@ -1,13 +1,24 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
 import { generateApiKey, getKeyPrefix, hmacSha256 } from '../../common/crypto.util';
 import { RedisService } from '../../common/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ArsSettingsService } from './ars-settings.service';
-import { parseOrigins } from './widget.service';
+import { parseOrigins, WidgetService } from './widget.service';
+import { getClientIp } from '../../common/request.util';
 import { randomBytes } from 'crypto';
+
+export class TestPopupDto {
+  @IsString() @MaxLength(40) appId!: string;
+  @IsOptional() @IsString() @Matches(/^\+?[0-9]{1,4}$/) country_code?: string;
+  @IsString() @MaxLength(20) expected_phone!: string;
+}
+
+export class TestVerifyDto {
+  @IsString() @Matches(/^ars_[A-Za-z0-9_-]{10,40}$/) session_id!: string;
+}
 
 export class AppSettingsDto {
   /** true = press 1 required, false = not required, null = follow the service default */
@@ -22,7 +33,8 @@ export class AppSettingsDto {
 @UseGuards(JwtAuthGuard)
 @Controller('api/console')
 export class CustomerConsoleController {
-  constructor(private readonly prisma: PrismaService, private readonly redis: RedisService, private readonly settings: ArsSettingsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly redis: RedisService, private readonly settings: ArsSettingsService,
+    private readonly widget: WidgetService) {}
 
   private userId(req: AuthenticatedRequest) {
     if (req.user?.kind !== 'user') throw new ForbiddenException('CUSTOMER_ONLY');
@@ -82,6 +94,38 @@ export class CustomerConsoleController {
     await this.prisma.applicationApp.update({ where: { id: app.id }, data: { siteKey } });
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'SITE_KEY_ISSUE', targetType: 'APPLICATION_APP', targetId: app.id, details: { prefix: siteKey.slice(0, 10) } } });
     return { id: app.id, siteKey };
+  }
+
+  // ------------------------------------------------------------ live call test (popup)
+
+  /** Approved apps of this customer that can be used for the live test (an active API key is needed). */
+  @Get('test/apps')
+  async testApps(@Req() req: AuthenticatedRequest) {
+    const userId = this.userId(req);
+    const apps = await this.prisma.applicationApp.findMany({ where: { status: 'APPROVED', application: { userId, status: 'APPROVED', apiKeys: { some: { status: 'ACTIVE' } } } },
+      select: { id: true, mobileAppName: true, displayName: true, platform: true, application: { select: { serviceName: true } } }, orderBy: { createdAt: 'asc' } });
+    return apps.map((a) => ({ id: a.id, name: a.displayName || a.mobileAppName, platform: a.platform, service: a.application.serviceName }));
+  }
+
+  /** Starts a PC-mode authentication for one of the customer's apps, shown in the popup. Counts as normal usage. */
+  @Post('test/popup')
+  async testPopup(@Req() req: AuthenticatedRequest, @Body() dto: TestPopupDto) {
+    const userId = this.userId(req);
+    const app = await this.prisma.applicationApp.findFirst({ where: { id: dto.appId, status: 'APPROVED', application: { userId, status: 'APPROVED' } }, include: { application: { include: { apiKeys: true } } } });
+    if (!app) throw new NotFoundException('APP_NOT_FOUND');
+    const key = app.application.apiKeys.find((k) => k.status === 'ACTIVE');
+    if (!key) throw new ForbiddenException('API_KEY_DISABLED');
+    return this.widget.startForClient({ apiKeyId: key.id, app }, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req),
+      phone: dto.expected_phone, countryCode: dto.country_code, purpose: '실통화 시험' });
+  }
+
+  /** The server-side check a customer's server would do (here with the customer's own key, without consuming). */
+  @Post('test/verify')
+  async testVerify(@Req() req: AuthenticatedRequest, @Body() dto: TestVerifyDto) {
+    const userId = this.userId(req);
+    const s = await this.prisma.arsSession.findFirst({ where: { sessionId: dto.session_id, apiKey: { application: { userId } } } });
+    if (!s) throw new NotFoundException('SESSION_NOT_FOUND');
+    return this.widget.verifyForKey(s.apiKeyId, s.sessionId, false);
   }
 
   /**

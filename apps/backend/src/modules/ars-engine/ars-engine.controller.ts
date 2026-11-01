@@ -256,6 +256,14 @@ export class ArsAdminController {
       country_code: dto?.country_code || undefined });
   }
 
+  /** Admin live test, PC mode in the popup (same page the widget uses). */
+  @Roles('OPERATOR', 'SUPER_ADMIN')
+  @Post('test/popup')
+  async testPopup(@Body() dto: { country_code?: string; expected_phone?: string }, @Req() req: Request) {
+    const c = await this.testClient();
+    return this.widget.startForClient(c, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req), phone: String(dto?.expected_phone ?? ''), countryCode: dto?.country_code, purpose: '관리자 시험' });
+  }
+
   /** Admin console demo of the web widget: a WEB app under the built-in test application (allowed: this site). */
   @Roles('OPERATOR', 'SUPER_ADMIN')
   @Get('test/widget-site')
