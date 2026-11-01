@@ -2,7 +2,7 @@ import { Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { apiClient } from '../../shared/api/client';
-import { ClientInfoView } from '../../shared/ars/ClientInfoView';
+import { SessionDetailButton, phoneIp, requesterIp } from '../../shared/ars/SessionDetailDrawer';
 
 const STATUS: Record<string, [string, string]> = {
   PENDING: ['전화 대기', 'gold'], CALL_CONFIRMED: ['PC 숫자 대기', 'blue'], VERIFIED: ['성공', 'green'],
@@ -31,7 +31,6 @@ export function AdminArsSessionsPage() {
                 options={Object.entries(STATUS).map(([v, [l]]) => ({ value: v, label: l }))} />
             </Space>
             <Table<Record<string, any>> rowKey="sessionId" size="small" loading={sessions.isLoading} dataSource={sessions.data?.items ?? []}
-              expandable={{ expandedRowRender: (r) => <ClientInfoView r={r} /> }}
               columns={[
                 { title: '요청', dataIndex: 'createdAt', render: dt },
                 { title: '앱', render: (_, r) => `${r.mobileAppName} (${r.clientPlatform}/${r.mode})` },
@@ -39,8 +38,11 @@ export function AdminArsSessionsPage() {
                 { title: '0507', dataIndex: 'vn', render: fmt },
                 { title: '발신', dataIndex: 'callerPhoneMasked' },
                 { title: '결과', render: (_, r) => <><Tag color={STATUS[r.status]?.[1]}>{STATUS[r.status]?.[0] ?? r.status}</Tag>{r.failReason ? REASON[r.failReason] ?? r.failReason : ''}</> },
+                { title: '웹·앱 IP', render: (_, r) => <Typography.Text code style={{ fontSize: 12 }}>{requesterIp(r)}</Typography.Text> },
+                { title: '휴대폰 IP', render: (_, r) => <Typography.Text code style={{ fontSize: 12 }}>{phoneIp(r)}</Typography.Text> },
                 { title: '앱 검증', dataIndex: 'integrityVerdict', render: (v) => <Tag color={v === 'PASSED' ? 'green' : v === 'FAILED' ? 'red' : 'default'}>{v}</Tag> },
                 { title: '완료', dataIndex: 'finishedAt', render: dt },
+                { title: '상세', width: 56, align: 'center', render: (_, r) => <SessionDetailButton r={r} admin /> },
               ]} />
           </>
         ) },
