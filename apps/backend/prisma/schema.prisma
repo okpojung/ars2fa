@@ -473,6 +473,15 @@ model AppAttestKey {
   applicationApp   ApplicationApp @relation(fields: [applicationAppId], references: [id])
 }
 
+/// Concurrent calls per minute (max of 2-second samples taken on the PBX host): SIP trunk channels and all Asterisk calls.
+model TrunkMinute {
+  minute     DateTime @id
+  trunkMax   Int
+  totalMax   Int
+  samples    Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
 model SystemSetting {
   key       String   @id
   value     Json

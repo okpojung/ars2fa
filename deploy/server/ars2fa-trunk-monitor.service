@@ -1,0 +1,12 @@
+[Unit]
+Description=ars2fa concurrent call monitor (Asterisk SIP trunk channels)
+After=asterisk.service docker.service
+
+[Service]
+ExecStart=/opt/ars2fa/trunk-monitor.sh
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

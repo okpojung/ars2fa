@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuthenticatedPrincipal } from '../../common/auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TrunkMonitorService } from '../ars-engine/trunk-monitor.service';
 
 const KST_MS = 9 * 3600_000;
 /** Start of today in KST as a UTC Date. */
@@ -13,7 +14,7 @@ function kstDayStart(d = new Date()): Date {
 /** Dashboard numbers from the ARS engine (ArsSession). Customers see only their own API keys. */
 @Injectable()
 export class StatisticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly trunk: TrunkMonitorService) {}
 
   async summary(principal: AuthenticatedPrincipal) {
     const admin = principal.kind === 'admin';
@@ -73,6 +74,7 @@ export class StatisticsService {
     out.carrier24h = { ok: carrierOk, failed: carrierFail, avgMs: Math.round(carrierAvg._avg.ms ?? 0), lastFailure: lastFail };
     out.calls24h = { total: calls24, invalid: invalid24 };
     out.recent = recent;
+    out.trunk = await this.trunk.summary();
     return out;
   }
 }

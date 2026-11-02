@@ -19,6 +19,7 @@ import {
 import { IntegrityService } from './integrity/integrity.service';
 import { NumberPoolService } from './number-pool.service';
 import { WidgetService } from './widget.service';
+import { TrunkMonitorService } from './trunk-monitor.service';
 import { cleanReportedInfo, describeRequest } from './client-info.util';
 
 function identity(dto: ClientDto, req: Request): ClientIdentity {
@@ -98,7 +99,7 @@ export class ArsPublicController {
 /** Loopback-only endpoints for the Asterisk dialplan (CURL) and the Daou AuthLog receiver. */
 @Controller('internal')
 export class ArsInternalController {
-  constructor(private readonly sessions: ArsSessionService) {}
+  constructor(private readonly sessions: ArsSessionService, private readonly trunk: TrunkMonitorService) {}
 
   private guard(req: Request) {
     const ip = (req.socket.remoteAddress ?? '').replace('::ffff:', '');
@@ -157,6 +158,15 @@ export class ArsInternalController {
     this.guard(req);
     await this.sessions.callEnded(dto.uid);
     res.type('text/plain').send('OK');
+  }
+
+  /** Concurrent call sample from the PBX host monitor (every few seconds): current and peak since the last post. */
+  @Post('pbx/trunk')
+  @HttpCode(200)
+  async trunkSample(@Body() body: { trunk?: number; total?: number; trunkPeak?: number; totalPeak?: number; maxcalls?: number }, @Req() req: Request) {
+    this.guard(req);
+    await this.trunk.record({ trunk: Number(body.trunk), total: Number(body.total), trunkPeak: Number(body.trunkPeak), totalPeak: Number(body.totalPeak), maxcalls: body.maxcalls == null ? null : Number(body.maxcalls) });
+    return { ok: true };
   }
 
   @Post('authlog')
