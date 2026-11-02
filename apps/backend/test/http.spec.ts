@@ -68,7 +68,7 @@ test('PC mode end to end over HTTP: dial page -> PBX connect -> code shown -> PB
     .send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: '888' }).expect(200);
   const con = await request(srv).post('/internal/pbx/connect').type('form')
     .send({ rn: s.rn, caller: '01097111104', uid: 'pc.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
-  expect(con.text).toBe('PC:4:9');
+  expect(con.text).toBe('PC:4:11');
   const st = await request(srv).post('/v1/ars/sessions/status')
     .send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'ANDROID', package_name: c.identity.package_name, session_id: created.body.session_id }).expect(200);
   expect(st.body.status).toBe('CALL_CONFIRMED');
@@ -253,7 +253,7 @@ test('customer ARS settings apply to new sessions; client info of browser and ph
   // PBX sees the customer's code length and time
   await request(srv).post('/internal/authlog').set('X-Internal-Key', KEY).send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: 'cs1' }).expect(200);
   const con = await request(srv).post('/internal/pbx/connect').type('form').send({ rn: s.rn, caller: '01097111104', uid: 'cs.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
-  expect(con.text).toBe('PC:6:24');
+  expect(con.text).toBe('PC:6:26');
   await request(srv).post('/internal/pbx/code').type('form').send({ uid: 'cs.1', code: s.pcCode, key: KEY }).expect(200);
   const v = await request(srv).post('/api/console/test/verify').set(auth).send({ session_id: s.sessionId }).expect(201);
   expect(v.body.clients.phone).toMatchObject({ device: 'Samsung SM-S918N' });

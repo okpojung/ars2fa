@@ -11,7 +11,7 @@ import { isHiddenCaller, isKrMobile, maskPhone, normalizeKrPhone, openText, phon
 import { VerifiedClient } from './api-key-auth.service';
 
 /** Result line returned to the PBX dialplan. */
-export type PbxVerdict = { result: 'OK' | 'FAIL'; reason?: string; pcCode?: string; sessionId?: string; mode?: 'APP' | 'PC'; digits?: number; readTimeout?: number; confirm?: boolean };
+export type PbxVerdict = { result: 'OK' | 'FAIL' | 'WAIT'; reason?: string; pcCode?: string; sessionId?: string; mode?: 'APP' | 'PC'; digits?: number; readTimeout?: number; confirm?: boolean };
 
 /** Time slack between Daou's callStartTime and our INVITE time (measured INVITE->AuthLog 1-2 s). */
 const AUTHLOG_BEFORE_MS = 20_000;
@@ -37,7 +37,7 @@ export const FAIL_REASONS = [
 ] as const;
 
 /** Length of the ARS guidance played (as Read prompt) before/while the caller keys in the PC code. */
-const PC_GUIDE_SECONDS = 6;
+const PC_GUIDE_SECONDS = 4; // ars2fa-pc-guide (3.3 s), played after the common greeting
 
 @Injectable()
 export class ArsSessionService {
@@ -266,7 +266,7 @@ export class ArsSessionService {
    * get the notice + confirm key (phase 'verify'); PC sessions move to CALL_CONFIRMED and the PC shows the code.
    * phase 'verify' (APP, after the confirm key): decides the call.
    */
-  async verifyCall(input: { rn: string; caller: string; uniqueId: string; t0: Date; confirmKey?: string; phase?: 'connect' | 'verify' }): Promise<PbxVerdict> {
+  async verifyCall(input: { rn: string; caller: string; uniqueId: string; t0: Date; confirmKey?: string; phase?: 'connect' | 'verify'; waitSeconds?: number }): Promise<PbxVerdict> {
     const phase = input.phase ?? 'verify';
     const s = await this.settings.get();
     const rn = (input.rn ?? '').replace(/\D/g, '').replace(/^82/, '0');
@@ -289,7 +289,7 @@ export class ArsSessionService {
     const callerHash = phoneHash(caller);
     const from = new Date(input.t0.getTime() - AUTHLOG_BEFORE_MS);
     const to = new Date(input.t0.getTime() + AUTHLOG_AFTER_MS);
-    const deadline = Date.now() + s.authlogWaitSeconds * 1000;
+    const deadline = Date.now() + (input.waitSeconds != null ? Math.min(10, Math.max(0, input.waitSeconds)) : s.authlogWaitSeconds) * 1000;
     let log: { id: string; vn: string; callStartAt: Date } | null = null;
     for (;;) {
       const rows = await this.prisma.$queryRaw<{ id: string; vn: string; callStartAt: Date }[]>`
@@ -303,6 +303,8 @@ export class ArsSessionService {
 
     // the session is identified by the 0507 the carrier saw; without AuthLog we cannot (and must not) trust the call
     if (!log) {
+      // the PBX asks again after a short message (keeps the caller listening instead of silence)
+      if (input.waitSeconds != null) return { result: 'WAIT' };
       // still fail the session this caller was probably trying, if it is unambiguous on this line
       return done({ result: 'FAIL', reason: 'no_authlog' });
     }

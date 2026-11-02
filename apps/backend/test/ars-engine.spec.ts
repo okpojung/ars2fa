@@ -231,7 +231,7 @@ describe('call verification', () => {
     expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 15 });
     expect(st.pc_code).toMatch(/^[0-9]{4}$/);
     expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 12_000);
-    expect(c1.readTimeout).toBe(9); // 15 s minus the 6 s guidance prompt
+    expect(c1.readTimeout).toBe(11); // 15 s minus the 4 s guidance prompt
     // forwarding switched back as soon as the call is connected (immediate carrier call, no sweeper needed)
     await new Promise((res) => setTimeout(res, 300));
     expect(carrierCalls).toContainEqual({ vn: s.vn, rn: s.rn, link: false });
@@ -287,6 +287,16 @@ describe('call verification', () => {
     await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: null } });
     const r2 = await sessions.create(await auth.verify(await seedIdentity(app.id)), {});
     expect((await vnOf(r2.session_id)).confirmKey).toBe(true);
+  });
+
+  test('connect with wait: WAIT while the AuthLog is missing (nothing recorded), then OK once it arrives', async () => {
+    const { client } = await setup();
+    const r = await sessions.create(client, { type: 0 });
+    const s = await vnOf(r.session_id);
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'w1', t0: new Date(), phase: 'connect', waitSeconds: 0 })).toEqual({ result: 'WAIT' });
+    expect((await vnOf(r.session_id)).status).toBe('PENDING');
+    await carrierLog(s.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'w1', t0: new Date(), phase: 'connect', waitSeconds: 1 })).toMatchObject({ result: 'OK', mode: 'APP', confirm: false });
   });
 
   test('request type overrides the app setting: 0 = no key press, 1 = press 1', async () => {

@@ -117,7 +117,7 @@ export class ArsInternalController {
     this.guard(req);
     const t0 = dto.t0 ? new Date(Number(dto.t0) * 1000) : new Date();
     const v = await this.sessions.verifyCall({ rn: dto.rn, caller: dto.caller ?? '', uniqueId: dto.uid, t0: Math.abs(t0.getTime() - Date.now()) < 600_000 ? t0 : new Date(), confirmKey: dto.confirm });
-    res.type('text/plain').send(v.result === 'OK' ? (v.pcCode ? `OK:${v.pcCode}` : 'OK') : `FAIL:${v.reason}`);
+    res.type('text/plain').send(v.result === 'OK' ? (v.pcCode ? `OK:${v.pcCode}` : 'OK') : v.result === 'WAIT' ? 'FAIL:no_authlog' : `FAIL:${v.reason}`);
   }
 
   /** "OK" if an authentication is waiting for a call on this 070, otherwise "NO" (PBX plays the invalid-access message). */
@@ -138,7 +138,8 @@ export class ArsInternalController {
     this.guard(req);
     const t0 = dto.t0 ? new Date(Number(dto.t0) * 1000) : new Date();
     const v = await this.sessions.verifyCall({ rn: dto.rn, caller: dto.caller ?? '', uniqueId: dto.uid,
-      t0: Math.abs(t0.getTime() - Date.now()) < 600_000 ? t0 : new Date(), phase: 'connect' });
+      t0: Math.abs(t0.getTime() - Date.now()) < 600_000 ? t0 : new Date(), phase: 'connect', waitSeconds: dto.wait != null ? Number(dto.wait) : undefined });
+    if (v.result === 'WAIT') { res.type('text/plain').send('WAIT'); return; }
     res.type('text/plain').send(v.result !== 'OK' ? `FAIL:${v.reason}` : v.mode === 'PC' ? `PC:${v.digits}:${v.readTimeout}` : v.confirm === false ? 'APPN' : 'APP');
   }
 

@@ -45,6 +45,8 @@ export class PbxVerifyDto {
   @IsString() @MaxLength(64) uid!: string;
   @IsOptional() @IsString() @Matches(/^[0-9]{9,11}$/) t0?: string;
   @IsOptional() @IsString() @MaxLength(4) confirm?: string;
+  /** connect only: wait at most this many seconds for the AuthLog and answer WAIT if it is not there yet (the PBX plays a short message and asks again) */
+  @IsOptional() @IsString() @Matches(/^[0-9]{1,2}(\.[0-9])?$/) wait?: string;
   @IsOptional() @IsString() @MaxLength(200) key?: string;
 }
 
