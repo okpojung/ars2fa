@@ -13,7 +13,8 @@ Content-Type: application/json
   "mobile_app_name": "바로포인트",        // 신청 때 등록한 앱 이름
   "client_platform": "ANDROID",           // ANDROID | IOS
   "package_name": "com.example.app",      // Android (iOS는 bundle_id)
-  "purpose": "로그인"                      // 선택, 40자 이내
+  "purpose": "로그인",                     // 선택, 40자 이내
+  "type": 1                               // 선택. 0 = 1번 누르기 없음, 1 = 1번 누르기 (생략 시 콘솔 앱 설정)
 }
 
 200 OK
@@ -28,7 +29,8 @@ Content-Type: application/json
   "display_name": "바로포인트",
   "notice": "바로포인트 인증 전화입니다. 본인이 요청하지 않았다면 전화를 끊으세요.",
   "server_time": "2026-10-31T08:00:00.000Z",
-  "confirm_key": true                      // 통화 중 1번 누르기 안내 여부(콘솔 앱 설정)
+  "confirm_key": true,                     // 통화 중 1번 누르기 여부
+  "type": 1                               // 이번 인증에 적용된 방식 (0 또는 1)
 }`;
 
 const STATUS = `POST ${BASE}/v1/ars/sessions/status
@@ -210,8 +212,15 @@ export function DocsPage() {
         <ul>
           <li>번호는 30초 동안만 유효하고, 전화가 연결되는 즉시 인증에서 빠집니다. 두 번째 전화는 인증되지 않습니다.</li>
           <li>이미 아는 회원을 다시 확인할 때는 <code>expected_phone</code>을 함께 보내면 그 번호로 건 전화만 성공합니다.</li>
-          <li><b>1번 누르기</b>(피싱 방지 확인)는 콘솔의 앱 설정에서 켜고 끌 수 있습니다.</li>
+          <li><b>1번 누르기</b>(피싱 방지 확인)는 요청의 <code>type</code>으로 정합니다. 보내지 않으면 콘솔의 앱 설정을 따릅니다.</li>
         </ul>
+        <table className="docs-table">
+          <thead><tr><th><code>type</code></th><th>통화 흐름</th><th>안내 시간</th></tr></thead>
+          <tbody>
+            <tr><td><code>0</code></td><td>연결 즉시 판정 → "발신 ARS 인증 서비스입니다. 휴대폰 인증이 완료되었습니다. 감사합니다."</td><td>약 7초</td></tr>
+            <tr><td><code>1</code></td><td>"발신 ARS 인증 서비스입니다. 휴대폰 인증을 하시려면 1번을 누르세요." → 1번 → "인증이 완료되었습니다. 감사합니다."</td><td>약 6초 + 1번 + 약 3초</td></tr>
+          </tbody>
+        </table>
         <h3>결과 조회</h3>
         <pre><code>{STATUS}</code></pre>
 

@@ -288,6 +288,19 @@ describe('call verification', () => {
     const r2 = await sessions.create(await auth.verify(await seedIdentity(app.id)), {});
     expect((await vnOf(r2.session_id)).confirmKey).toBe(true);
   });
+
+  test('request type overrides the app setting: 0 = no key press, 1 = press 1', async () => {
+    const { app } = await setup();
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: true } });
+    const r0 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { type: 0 });
+    expect(r0).toMatchObject({ confirm_key: false, type: 0 });
+    expect((await vnOf(r0.session_id)).confirmKey).toBe(false);
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: false } });
+    const r1 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { type: '1' });
+    expect(r1).toMatchObject({ confirm_key: true, type: 1 });
+    const rd = await sessions.create(await auth.verify(await seedIdentity(app.id)), {});
+    expect(rd).toMatchObject({ confirm_key: false, type: 0 });
+  });
   test('PC mode: a different phone than the one typed on the PC fails at connect', async () => {
     const { client } = await setup();
     const r = await sessions.create(client, { mode: 'PC', expected_phone: '01011112222' });

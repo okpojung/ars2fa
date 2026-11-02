@@ -23,6 +23,8 @@ export class CreateSessionDto extends IntegrityFieldsDto {
   @IsOptional() @IsString() @MaxLength(40) purpose?: string;
   @IsOptional() @IsString() @MaxLength(20) expected_phone?: string;
   @IsOptional() @IsString() @Matches(/^\+?[0-9]{1,4}$/) country_code?: string;
+  /** APP call flow: 0 = no key press (decided on connect), 1 = press 1 after the notice. Omitted = app / customer setting. */
+  @IsOptional() @IsIn([0, 1, '0', '1']) type?: 0 | 1 | '0' | '1';
 }
 
 export class SessionRefDto extends ClientDto {

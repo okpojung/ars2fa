@@ -84,7 +84,7 @@ export class ArsSessionService {
   // ---------------------------------------------------------------------------------------------
 
   async create(client: VerifiedClient, body: IntegrityInput & {
-    mode?: ArsSessionMode; appsid?: string; purpose?: string; expected_phone?: string; country_code?: string;
+    mode?: ArsSessionMode; appsid?: string; purpose?: string; expected_phone?: string; country_code?: string; type?: 0 | 1 | '0' | '1';
   }): Promise<CreateSessionResult> {
     // system settings with the customer's own ARS settings applied
     const owner = await this.prisma.apiApplication.findUnique({ where: { id: client.app.applicationId }, select: { user: { select: { arsSettings: true } } } });
@@ -105,6 +105,7 @@ export class ArsSessionService {
     // App forgery check happens before a number is leased (ENFORCE refuses here).
     const integrity = await this.integrity.evaluate(client.app, client.apiKeyId, body);
 
+    const reqType = body.type == null ? null : Number(body.type);
     const ttl = mode === 'PC' ? s.leaseSecondsPc : s.leaseSecondsApp;
     // forwarding on only for this session; switched off at expiresAt or when the call is over
     const { leased, expiresAt } = await this.leaseAndLink(ttl, s.cooldownSeconds);
@@ -118,8 +119,8 @@ export class ArsSessionService {
         displayName: client.app.displayName || client.app.mobileAppName, clientPlatform: client.app.platform, mode,
         appsid: body.appsid?.slice(0, 100), purpose: body.purpose ?? null, vnId: leased.vnId, vn: leased.vn, rn: leased.rn,
         expectedPhoneHash: expectedHash, pcCode, dialToken, pcCodeSeconds: mode === 'PC' ? s.pcCodeSeconds : null,
-        // press-1 after the notice: the customer's per-app choice, otherwise the system default
-        confirmKey: mode === 'APP' ? (client.app.confirmKeyRequired ?? s.confirmKeyRequired) : false,
+        // press-1 after the notice: the request's type (0/1) first, then the customer's per-app choice, then the customer / system default
+        confirmKey: mode === 'APP' ? (reqType != null ? reqType === 1 : (client.app.confirmKeyRequired ?? s.confirmKeyRequired)) : false,
         integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,
       },
     });
@@ -132,7 +133,7 @@ export class ArsSessionService {
       mode,
       // APP: the app dials this itself; it must not be printed on screen (see SDK guide).
       // PC: the number is never given to the PC; the QR carries dial_page_url, a one-time mobile page with a call button.
-      ...(mode === 'APP' ? { confirm_key: session.confirmKey } : {}),
+      ...(mode === 'APP' ? { confirm_key: session.confirmKey, type: session.confirmKey ? 1 : 0 } : {}),
       ...(mode === 'PC' ? { dial_page_url: `${base}/m/ars/${dialToken}` } : { dial_number: dial, dial_uri: `tel:${dial}` }),
       expires_at: expiresAt.toISOString(),
       expires_in: ttl,
