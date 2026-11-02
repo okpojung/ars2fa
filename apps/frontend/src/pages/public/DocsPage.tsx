@@ -217,8 +217,8 @@ export function DocsPage() {
         <table className="docs-table">
           <thead><tr><th><code>type</code></th><th>통화 흐름</th><th>안내 시간</th></tr></thead>
           <tbody>
-            <tr><td><code>0</code></td><td>연결 즉시 판정 → "발신 ARS 인증 서비스입니다. 휴대폰 인증이 완료되었습니다. 감사합니다."</td><td>약 7초</td></tr>
-            <tr><td><code>1</code></td><td>"발신 ARS 인증 서비스입니다. 휴대폰 인증을 하시려면 1번을 누르세요." → 1번 → "인증이 완료되었습니다. 감사합니다."</td><td>약 6초 + 1번 + 약 3초</td></tr>
+            <tr><td><code>0</code></td><td>"발신 ARS 인증 서비스입니다." → 통신사 확인 → 성공: "휴대폰 인증이 완료되었습니다. 감사합니다." / 실패: "휴대폰 인증이 실패했습니다. 다시 이용해 주세요."</td><td>약 6초</td></tr>
+            <tr><td><code>1</code></td><td>"발신 ARS 인증 서비스입니다." → "휴대폰 인증을 하시려면 1번을 누르세요." → 1번 → "인증이 완료되었습니다. 감사합니다."</td><td>약 5초 + 1번 + 약 3초</td></tr>
           </tbody>
         </table>
         <h3>결과 조회</h3>
