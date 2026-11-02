@@ -62,7 +62,7 @@ export function ApplicationDetailPage() {
           ]} expandable={{ rowExpandable: (a) => a.platform === 'WEB', defaultExpandAllRows: true,
             expandedRowRender: (a) => <WebWidgetSettings app={a} /> }} />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          1번 누르기: 통화 첫머리의 피싱 방지 안내 뒤 1번을 눌러야 인증됩니다. 끄면 안내 없이 바로 인증합니다.
+          1번 누르기: 켜면 "휴대폰 인증을 하시려면 1번을 누르세요" 안내 후 1번을 눌러야 인증됩니다. 끄면 1번 없이 연결 즉시 인증합니다. 인증 요청에 type(0/1)을 보내면 그 값이 먼저 적용됩니다.
           앱 인증에만 적용되며, PC 인증은 화면의 숫자를 휴대폰으로 누르는 방식입니다.
         </Typography.Paragraph>
       </Card>
