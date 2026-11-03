@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import type { Request } from 'express';
 import { getClientIp } from '../../common/request.util';
 import { WidgetService } from './widget.service';
+import { ArsSessionService } from './ars-session.service';
 import { describeRequest } from './client-info.util';
 
 export class WidgetStartDto {
@@ -24,7 +25,7 @@ export class WidgetVerifyDto {
 @ApiTags('widget')
 @Controller()
 export class WidgetController {
-  constructor(private readonly widget: WidgetService) {}
+  constructor(private readonly widget: WidgetService, private readonly sessions: ArsSessionService) {}
 
   /** Browser (widget.js): starts a PC-mode authentication for the phone typed on the page. Origin must be registered. */
   @Post('v1/widget/sessions')
@@ -40,6 +41,15 @@ export class WidgetController {
     const auth = req.header('authorization');
     const key = dto.api_key ?? (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
     return this.widget.verify(key, dto.session_id, dto.consume === true);
+  }
+
+  /** Popup opened on the phone itself: switch to a direct call from this phone (no QR / code). */
+  @Post('api/public/ars/widget/:token/same-device')
+  @HttpCode(200)
+  async sameDevice(@Param('token') token: string, @Req() req: Request) {
+    const r = await this.sessions.sameDevice(token, describeRequest(req));
+    if (!r) throw new NotFoundException('SESSION_NOT_ACTIVE');
+    return r;
   }
 
   /** Popup page state (public, one-time token). */

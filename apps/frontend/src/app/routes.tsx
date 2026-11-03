@@ -3,6 +3,7 @@ import { AppLayout } from '../shared/components/AppLayout';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { LoginPage } from '../pages/public/LoginPage';
 import { SignupPage } from '../pages/public/SignupPage';
+import { FormTestPage } from '../pages/public/FormTestPage';
 import { ConsoleDashboardPage } from '../pages/user/ConsoleDashboardPage';
 import { ConsoleSessionsPage } from '../pages/user/ConsoleSessionsPage';
 import { ConsoleTestPage } from '../pages/user/ConsoleTestPage';
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
   { path: '/admin/login', element: <LoginPage admin /> },
   { path: '/m/ars/:token', element: <MobileDialPage /> },
   { path: '/w/pc/:token', element: <WidgetPopupPage /> },
+  { path: '/form_test', element: <FormTestPage /> },
   // old customer paths
   ...['/applications', '/api-keys', '/auth-requests', '/statistics'].map((p) => ({ path: p, element: <Navigate to={p === '/auth-requests' ? '/console/sessions' : p === '/statistics' ? '/console' : `/console${p}`} replace /> })),
   {

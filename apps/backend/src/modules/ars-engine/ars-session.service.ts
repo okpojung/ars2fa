@@ -172,6 +172,22 @@ export class ArsSessionService {
     return this.status(client, sessionId);
   }
 
+  /**
+   * Web popup opened on the phone itself (mobile browser): no QR and no code to read off another screen.
+   * The phone dials directly; the call is decided on connect like an app without press-1. The expected phone,
+   * the carrier AuthLog and one-call-per-number still apply. Returns the tel: URI for the call button.
+   */
+  async sameDevice(widgetToken: string, info: ClientInfo) {
+    if (!widgetToken || !/^[A-Za-z0-9_-]{20,40}$/.test(widgetToken)) return null;
+    const s = await this.prisma.arsSession.findUnique({ where: { widgetToken } });
+    if (!s || s.mode !== 'PC' || s.status !== 'PENDING' || s.expiresAt <= this.now()) return null;
+    if (s.pcCode !== null) {
+      await this.prisma.arsSession.update({ where: { id: s.id }, data: { pcCode: null, confirmKey: false, ...(s.mobileClient ? {} : { mobileClient: info as Prisma.InputJsonValue }) } });
+      await this.event(s.id, 'SAME_DEVICE', { device: info.device ?? null });
+    }
+    return { tel: `tel:${this.dialString(s.vn)}`, expires_at: s.expiresAt.toISOString() };
+  }
+
   /** Browser / app that started the authentication. */
   async attachStarter(sessionId: string, info: ClientInfo) {
     await this.prisma.arsSession.update({ where: { sessionId }, data: { pcClient: info as Prisma.InputJsonValue } }).catch(() => undefined);
@@ -322,7 +338,8 @@ export class ArsSessionService {
       return done({ result: 'FAIL', reason: 'second_call', sessionId: session.sessionId });
     }
     if (phase === 'connect') return done(await this.connectChecks(session, log, { callerHash, caller, uniqueId: call.uniqueId }, s));
-    if (session.mode === 'PC') return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
+    // PC mode decides with the code keyed in (pbx/code); a same-phone web session (no code) is decided here like an app without press-1
+    if (session.mode === 'PC' && session.pcCode) return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });
     if (session.confirmKey && input.confirmKey !== '1') {
       await this.finish(session, 'FAILED', 'not_confirmed', { callerHash, caller, uniqueId: call.uniqueId, logId: log.id, at: log.callStartAt });
       return done({ result: 'FAIL', reason: 'not_confirmed', sessionId: session.sessionId });

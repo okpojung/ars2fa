@@ -11,6 +11,8 @@ import { WidgetService } from './widget.service';
 import { IntegrityService } from './integrity/integrity.service';
 import { NumberPoolService } from './number-pool.service';
 import { TrunkMonitorService } from './trunk-monitor.service';
+import { FormTestController } from './form-test.controller';
+import { MailService } from './mail.service';
 
 /**
  * Every 2 s: expires overdue sessions (numbers go into cooldown) and switches off CallMix forwarding that is due.
@@ -47,8 +49,8 @@ export class ArsSweeper implements OnModuleInit, OnModuleDestroy {
 }
 
 @Module({
-  controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController, CustomerConsoleController, WidgetController],
-  providers: [ArsSessionService, NumberPoolService, ArsSettingsService, IntegrityService, ApiKeyAuthService, RedisService, CarrierService, WidgetService, TrunkMonitorService, ArsSweeper],
+  controllers: [ArsApiController, ArsInternalController, ArsAdminController, ArsPublicController, CustomerConsoleController, WidgetController, FormTestController],
+  providers: [ArsSessionService, NumberPoolService, ArsSettingsService, IntegrityService, ApiKeyAuthService, RedisService, CarrierService, WidgetService, TrunkMonitorService, MailService, ArsSweeper],
   exports: [ArsSessionService, NumberPoolService, CarrierService, WidgetService, TrunkMonitorService],
 })
 export class ArsEngineModule {}

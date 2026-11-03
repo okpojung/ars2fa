@@ -299,6 +299,25 @@ describe('call verification', () => {
     expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'w1', t0: new Date(), phase: 'connect', waitSeconds: 1 })).toMatchObject({ result: 'OK', mode: 'APP', confirm: false });
   });
 
+  test('web popup on the phone itself: same-device switch drops the code, the call verifies on connect; wrong phone still fails', async () => {
+    const { client } = await setup();
+    const r = await sessions.create(client, { mode: 'PC', expected_phone: '01097111104' });
+    const s0 = await vnOf(r.session_id);
+    const token = `wt${Date.now()}abcdefghijklmnop`.slice(0, 30);
+    await prisma.arsSession.update({ where: { sessionId: r.session_id }, data: { widgetToken: token } });
+    const sd = await sessions.sameDevice(token, { ip: '223.38.1.2', device: 'Samsung SM-S918N' } as never);
+    expect(sd?.tel).toMatch(/^tel:0507/);
+    const s = await vnOf(r.session_id);
+    expect(s.pcCode).toBeNull();
+    expect(s.confirmKey).toBe(false);
+    await carrierLog(s0.vn, '01097111104');
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'sd1', t0: new Date(), phase: 'connect' })).toMatchObject({ result: 'OK', mode: 'APP', confirm: false });
+    expect(await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'sd1', t0: new Date(), confirmKey: '' })).toMatchObject({ result: 'OK' });
+    expect((await vnOf(r.session_id)).status).toBe('VERIFIED');
+    // a finished session cannot be switched again
+    expect(await sessions.sameDevice(token, {} as never)).toBeNull();
+  });
+
   test('request type overrides the app setting: 0 = no key press, 1 = press 1', async () => {
     const { app } = await setup();
     await prisma.applicationApp.update({ where: { id: app.id }, data: { confirmKeyRequired: true } });

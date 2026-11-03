@@ -22,12 +22,35 @@ function useLeft(iso: string | null | undefined, offset: number) {
   return left;
 }
 
-/** Popup opened by widget.js on a customer site: QR -> code (DTMF on the phone) -> result posted back to the page. */
+/** Phone / tablet browser: the popup runs on the phone that will call, so a QR makes no sense. */
+export function isMobileBrowser() {
+  const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  if (nav.userAgentData?.mobile) return true;
+  const ua = navigator.userAgent;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * Popup opened by widget.js on a customer site: QR -> code (DTMF on the phone) -> result posted back to the page.
+ * On a phone browser: [전화 걸기] on this phone instead (no QR, no code; decided when the call connects).
+ */
 export function WidgetPopupPage() {
   const { token } = useParams();
   const [d, setD] = useState<PopupState | null>(null);
   const [offset, setOffset] = useState(0);
   const posted = useRef(false);
+  const mobile = useRef(isMobileBrowser()).current;
+  const [tel, setTel] = useState<string | null>(null);
+  const [showQr, setShowQr] = useState(false);
+  const asked = useRef(false);
+
+  // phone browser: switch this authentication to a direct call from this phone (once), get the call link
+  useEffect(() => {
+    if (!mobile || asked.current || d?.state !== 'PENDING') return;
+    asked.current = true;
+    fetch(`/api/public/ars/widget/${encodeURIComponent(token ?? '')}/same-device`, { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null)).then((j) => { if (j?.tel) setTel(j.tel); }).catch(() => undefined);
+  }, [mobile, d?.state, token]);
   const final = d && ['VERIFIED', 'FAILED', 'EXPIRED', 'CANCELED', 'NOT_FOUND'].includes(d.state);
 
   useEffect(() => {
@@ -67,14 +90,31 @@ export function WidgetPopupPage() {
       {d?.display_name && <Typography.Text type="secondary">{d.display_name}</Typography.Text>}
       {!d && <div style={{ padding: 60 }}><Spin /></div>}
 
-      {d?.state === 'PENDING' && d.dial_page_url && (
+      {d?.state === 'PENDING' && mobile && tel && !showQr && (
+        <>
+          <Typography.Paragraph style={{ fontSize: 16, margin: '20px 0 14px' }}>
+            아래 <b>전화 걸기</b>를 누르고, 번호가 입력되면 <b>통화</b>를 누르세요.
+          </Typography.Paragraph>
+          <a href={tel} style={{ display: 'block', background: '#1677ff', color: '#fff', borderRadius: 10, padding: '16px 0', fontSize: 20, fontWeight: 700, textDecoration: 'none' }}>
+            전화 걸기
+          </a>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 13, marginTop: 14 }}>
+            안내 멘트가 나오면 인증이 끝납니다. 통화가 끝나면 이 화면으로 돌아오세요.
+          </Typography.Paragraph>
+          <div style={{ fontSize: 16, color: callLeft !== null && callLeft <= 10 ? '#cf1322' : '#333' }}>남은 시간 {callLeft ?? '-'}초</div>
+          <Button type="link" size="small" style={{ marginTop: 8 }} onClick={() => setShowQr(true)}>다른 휴대폰으로 인증 (QR 보기)</Button>
+        </>
+      )}
+      {d?.state === 'PENDING' && mobile && !tel && !showQr && <div style={{ padding: 40 }}><Spin /></div>}
+
+      {d?.state === 'PENDING' && d.dial_page_url && (!mobile || showQr) && (
         <>
           <div style={{ display: 'flex', justifyContent: 'center', margin: '18px 0 12px' }}><QRCode value={d.dial_page_url} size={220} /></div>
           <Typography.Paragraph style={{ fontSize: 15, marginBottom: 6 }}>
             휴대폰 카메라로 QR을 찍고 <b>전화걸기</b>를 누른 뒤, 번호가 입력되면 바로 <b>통화</b>를 누르세요.
           </Typography.Paragraph>
           <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
-            전화가 연결되면 이 창에 인증번호가 나타납니다. 그 번호를 휴대폰 키패드로 누르세요.
+            {tel ? '전화가 연결되고 안내 멘트가 나오면 인증이 끝납니다.' : '전화가 연결되면 이 창에 인증번호가 나타납니다. 그 번호를 휴대폰 키패드로 누르세요.'}
           </Typography.Paragraph>
           <div style={{ fontSize: 16, color: callLeft !== null && callLeft <= 10 ? '#cf1322' : '#333' }}>남은 시간 {callLeft ?? '-'}초</div>
         </>
