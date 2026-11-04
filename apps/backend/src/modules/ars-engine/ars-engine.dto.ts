@@ -94,6 +94,9 @@ export class AppSecurityDto {
   @IsOptional() @IsString() @MaxLength(40) displayName?: string;
   @IsOptional() @IsString() @MaxLength(500) androidCertSha256?: string;
   @IsOptional() @IsString() @Matches(/^[A-Z0-9]{10}$|^$/) iosTeamId?: string;
+  /** needed only for app forgery protection (Play Integrity / App Attest); empty = not registered */
+  @IsOptional() @IsString() @Matches(/^$|^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/) @MaxLength(200) packageName?: string;
+  @IsOptional() @IsString() @Matches(/^$|^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/) @MaxLength(200) bundleId?: string;
 }
 
 export class ArsSettingsDto {

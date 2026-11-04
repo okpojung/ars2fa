@@ -209,6 +209,10 @@ test('customer console live test: own approved app, popup, own verification', as
   await request(srv).post('/api/auth/signup').send({ email, password: 'Abcd123!', companyName: 'Co', contactName: 'N', contactPhone: '01000000000' }).expect(201);
   const auth = { Authorization: `Bearer ${(await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' })).body.accessToken}` };
   expect((await request(srv).get('/api/console/test/apps').set(auth).expect(200)).body).toEqual([]);
+  // the console form now sends only the service name, app name and platform
+  const slim = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID' }] }).expect(201);
+  expect(slim.body).toMatchObject({ usagePurpose: '', expectedMonthlyRequests: 0 });
+  await prisma.apiApplication.delete({ where: { id: slim.body.id } }).catch(() => undefined);
   const created = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Svc', usagePurpose: 'x', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'A', platform: 'ANDROID', packageName: 'a.b' }] }).expect(201);
   await prisma.apiApplication.update({ where: { id: created.body.id }, data: { status: 'APPROVED' } });
   await prisma.applicationApp.updateMany({ where: { applicationId: created.body.id }, data: { status: 'APPROVED' } });

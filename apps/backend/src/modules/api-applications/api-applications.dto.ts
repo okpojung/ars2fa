@@ -41,13 +41,15 @@ export class CreateApplicationDto {
   @IsNotEmpty()
   serviceName!: string;
 
+  /** no longer asked in the console form (kept optional for API compatibility) */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  usagePurpose!: string;
+  usagePurpose?: string;
 
+  @IsOptional()
   @IsInt()
-  @Min(1)
-  expectedMonthlyRequests!: number;
+  @Min(0)
+  expectedMonthlyRequests?: number;
 
   @IsOptional()
   @IsString()

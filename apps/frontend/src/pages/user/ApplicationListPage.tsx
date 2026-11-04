@@ -22,7 +22,6 @@ export function ApplicationListPage() {
         columns={[
           { title: '서비스명', dataIndex: 'serviceName' },
           { title: '상태', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
-          { title: '예상 월 요청', dataIndex: 'expectedMonthlyRequests' },
           {
             title: '상세',
             render: (_, record) => <Link to={`/console/applications/${record.id}`}>보기</Link>,

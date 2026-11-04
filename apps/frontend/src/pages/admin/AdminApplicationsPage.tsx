@@ -32,7 +32,6 @@ export function AdminApplicationsPage() {
           { title: '서비스명', dataIndex: 'serviceName' },
           { title: '회사', render: (_, record) => record.user?.companyName },
           { title: '상태', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
-          { title: '예상 월 요청', dataIndex: 'expectedMonthlyRequests' },
           {
             title: '작업',
             render: (_, record) => (

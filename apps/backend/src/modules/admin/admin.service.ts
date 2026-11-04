@@ -112,7 +112,8 @@ export class AdminService {
           keyPrefix: getKeyPrefix(rawApiKey),
           environment: 'TEST',
           status: 'ACTIVE',
-          monthlyLimit: application.expectedMonthlyRequests,
+          // monthly limit: default unless the (old) application form gave a number; adjustable in API Key 운영
+          monthlyLimit: application.expectedMonthlyRequests > 0 ? application.expectedMonthlyRequests : Number(process.env.DEFAULT_MONTHLY_LIMIT ?? 10000),
           rateLimitPerMinute: 60,
         },
       });

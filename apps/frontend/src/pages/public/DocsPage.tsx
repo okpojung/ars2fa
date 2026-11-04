@@ -12,7 +12,7 @@ Content-Type: application/json
 {
   "mobile_app_name": "바로포인트",        // 신청 때 등록한 앱 이름
   "client_platform": "ANDROID",           // ANDROID | IOS
-  "package_name": "com.example.app",      // Android (iOS는 bundle_id)
+  "package_name": "com.example.app",      // 선택: Android (iOS는 bundle_id). 앱 위조 방지를 쓸 때 사용
   "purpose": "로그인",                     // 선택, 40자 이내
   "type": 1                               // 선택. 0 = 1번 누르기 없음, 1 = 1번 누르기 (생략 시 콘솔 앱 설정)
 }
@@ -201,9 +201,9 @@ export function DocsPage() {
 
         <h2>1. 시작하기</h2>
         <ol>
-          <li><Link to="/signup">회원 가입</Link> 후 콘솔에서 <b>API 신청</b>을 제출합니다. 앱 이름, 플랫폼, Android 패키지명 / iOS Bundle ID가 필요합니다.</li>
+          <li><Link to="/signup">회원 가입</Link> 후 콘솔에서 <b>API 신청</b>을 제출합니다. 서비스명, 앱(또는 웹사이트) 이름, 플랫폼만 넣으면 됩니다(웹은 사이트 주소도).</li>
           <li>승인되면 콘솔 <b>API Key</b> 메뉴에서 [키 발급]을 눌러 키를 받습니다. 원문은 한 번만 표시됩니다.</li>
-          <li>모든 요청에 <code>Authorization: Bearer &lt;API_KEY&gt;</code>(또는 본문 <code>api_key</code>)와 앱 식별 필드 <code>mobile_app_name</code>, <code>client_platform</code>, <code>package_name</code>/<code>bundle_id</code>를 보냅니다. 등록한 값과 다르면 거절됩니다.</li>
+          <li>모든 요청에 <code>Authorization: Bearer &lt;API_KEY&gt;</code>(또는 본문 <code>api_key</code>)와 앱 식별 필드 <code>mobile_app_name</code>, <code>client_platform</code>, <code>package_name</code>/<code>bundle_id</code>(선택)를 보냅니다. 앱 이름과 플랫폼이 등록한 값과 다르면 거절됩니다. 패키지명/Bundle ID는 앱 위조 방지(Play Integrity, App Attest)를 쓸 때 등록하며, 등록된 경우에만 비교합니다.</li>
         </ol>
 
         <h2>2. 앱 인증</h2>

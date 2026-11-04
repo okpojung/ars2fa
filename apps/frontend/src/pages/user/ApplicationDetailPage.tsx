@@ -47,8 +47,6 @@ export function ApplicationDetailPage() {
         <Typography.Title level={3} style={{ marginTop: 0 }}>{data?.serviceName}</Typography.Title>
         <Descriptions bordered column={2} size="small">
           <Descriptions.Item label="상태"><Tag color={data?.status === 'APPROVED' ? 'green' : undefined}>{APPLICATION_STATUS[data?.status] ?? data?.status}</Tag></Descriptions.Item>
-          <Descriptions.Item label="예상 월 요청 수">{data?.expectedMonthlyRequests?.toLocaleString()}</Descriptions.Item>
-          <Descriptions.Item label="사용 목적" span={2}>{data?.usagePurpose}</Descriptions.Item>
           <Descriptions.Item label="관리자 의견" span={2}>{data?.adminComment ?? '-'}</Descriptions.Item>
         </Descriptions>
       </Card>

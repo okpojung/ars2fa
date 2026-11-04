@@ -1,5 +1,5 @@
 import {
-  Body, Controller, ForbiddenException, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards,
+  BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -323,8 +323,17 @@ export class ArsAdminController {
   @Roles('REVIEWER', 'SUPER_ADMIN')
   @Patch('apps/:id/security')
   async appSecurity(@Param('id') id: string, @Body() dto: AppSecurityDto, @Req() req: AuthenticatedRequest) {
+    const cur = await this.prisma.applicationApp.findUniqueOrThrow({ where: { id } });
+    const pkg = dto.packageName === undefined ? cur.packageName : dto.packageName.trim() || null;
+    const bundle = dto.bundleId === undefined ? cur.bundleId : dto.bundleId.trim() || null;
+    const team = dto.iosTeamId === undefined ? cur.iosTeamId : dto.iosTeamId || null;
+    // ENFORCE without the app identity would refuse every request: require it first
+    if ((dto.integrityPolicy ?? cur.integrityPolicy) === 'ENFORCE') {
+      if (cur.platform === 'ANDROID' && !pkg) throw new BadRequestException('강제 검증에는 Android 패키지명이 필요합니다.');
+      if (cur.platform === 'IOS' && (!bundle || !team)) throw new BadRequestException('강제 검증에는 iOS Bundle ID와 Team ID가 필요합니다.');
+    }
     const app = await this.prisma.applicationApp.update({ where: { id }, data: {
-      integrityPolicy: dto.integrityPolicy, displayName: dto.displayName, androidCertSha256: dto.androidCertSha256, iosTeamId: dto.iosTeamId || undefined } });
+      integrityPolicy: dto.integrityPolicy, displayName: dto.displayName, androidCertSha256: dto.androidCertSha256, iosTeamId: team, packageName: pkg, bundleId: bundle } });
     await this.prisma.auditLog.create({ data: { actorType: 'ADMIN', actorId: req.user!.id, action: 'APP_SECURITY_UPDATE', targetType: 'APPLICATION_APP', targetId: id, details: { ...dto } } });
     return app;
   }

@@ -47,8 +47,8 @@ export class ApiApplicationsService {
       data: {
         userId,
         serviceName: dto.serviceName,
-        usagePurpose: dto.usagePurpose,
-        expectedMonthlyRequests: dto.expectedMonthlyRequests,
+        usagePurpose: dto.usagePurpose ?? '',
+        expectedMonthlyRequests: dto.expectedMonthlyRequests ?? 0,
         allowedIps: dto.allowedIps,
         callbackUrl: dto.callbackUrl,
         apps: {
@@ -80,8 +80,8 @@ export class ApiApplicationsService {
         where: { id },
         data: {
           serviceName: dto.serviceName,
-          usagePurpose: dto.usagePurpose,
-          expectedMonthlyRequests: dto.expectedMonthlyRequests,
+          usagePurpose: dto.usagePurpose ?? '',
+          expectedMonthlyRequests: dto.expectedMonthlyRequests ?? 0,
           allowedIps: dto.allowedIps,
           callbackUrl: dto.callbackUrl,
           apps: {
