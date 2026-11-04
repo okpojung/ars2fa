@@ -162,12 +162,25 @@ export class CustomerConsoleController {
    * Issues a new secret for one of the customer's API keys and returns it once. The old secret stops working at once.
    * (Keys are created when the application is approved; the customer takes the secret from here.)
    */
+  /** Before a key is shown: ARS check of the account's contact phone (verified at sign-up), in the popup. */
+  @Post('api-keys/phone/start')
+  async keyPhoneStart(@Req() req: AuthenticatedRequest) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: this.userId(req) }, select: { contactPhone: true } });
+    const client = await this.widget.systemClient('ARS2FA-KEYISSUE', 'WEB', 'ARS2FA API Key 발급');
+    return this.widget.startForClient(client, { origin: this.widget.ownOrigin(req.header('origin')), ip: getClientIp(req),
+      phone: user.contactPhone, countryCode: '82', purpose: 'API Key 발급', clientInfo: describeRequest(req) });
+  }
+
   @Post('api-keys/:id/rotate')
-  async rotate(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+  async rotate(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: { phoneSessionId?: string }) {
     const userId = this.userId(req);
     const key = await this.prisma.apiKey.findFirst({ where: { id, application: { userId } }, omit: { keyHash: false } });
     if (!key) throw new NotFoundException('API_KEY_NOT_FOUND');
     if (key.status === 'REVOKED') throw new ForbiddenException('API_KEY_REVOKED');
+    // the secret is shown only after an ARS check of the account's own phone (5 minutes, one use)
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { contactPhone: true } });
+    await this.widget.consumePhoneCheck(typeof body?.phoneSessionId === 'string' ? body.phoneSessionId : undefined, 'ARS2FA-KEYISSUE',
+      user.contactPhone, 5, '인증한 휴대폰이 계정의 담당자 연락처와 다릅니다.');
     const raw = generateApiKey(key.environment as 'TEST' | 'LIVE');
     const keyHash = hmacSha256(process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret', raw);
     await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash, keyPrefix: getKeyPrefix(raw) } });

@@ -102,8 +102,15 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   const detail = await request(srv).get(`/api/applications/${created.body.id}`).set(auth).expect(200);
   expect(JSON.stringify(detail.body)).not.toMatch(/keyHash|passwordHash/);
 
-  const rot = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).expect(201);
+  // the key is shown only after an ARS check of the account's contact phone
+  await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).send({}).expect(400);
+  const kp = await request(srv).post('/api/console/api-keys/phone/start').set(auth).set('Origin', 'https://ars2fa.baro.me').expect(201);
+  await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).send({ phoneSessionId: kp.body.session_id }).expect(400); // not verified yet
+  await completePcCall(kp.body.session_id, '01000000000', 'key.1');
+  const rot = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).send({ phoneSessionId: kp.body.session_id }).expect(201);
   expect(rot.body.apiKey).toBeTruthy();
+  // one use only
+  await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).send({ phoneSessionId: kp.body.session_id }).expect(400);
   const id = { mobile_app_name: 'MyApp', client_platform: 'ANDROID', package_name: 'com.my.app' };
   await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(201);
 
@@ -115,7 +122,9 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   expect((await prisma.arsSession.findUniqueOrThrow({ where: { sessionId: s2.body.session_id } })).confirmKey).toBe(false);
 
   // rotating again invalidates the previous secret
-  const rot2 = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).expect(201);
+  const kp2 = await request(srv).post('/api/console/api-keys/phone/start').set(auth).set('Origin', 'https://ars2fa.baro.me').expect(201);
+  await completePcCall(kp2.body.session_id, '01000000000', 'key.2');
+  const rot2 = await request(srv).post(`/api/console/api-keys/${keyRow.id}/rotate`).set(auth).send({ phoneSessionId: kp2.body.session_id }).expect(201);
   await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(401);
   expect(rot2.body.apiKey).not.toBe(rot.body.apiKey);
 
@@ -210,7 +219,9 @@ test('customer console live test: own approved app, popup, own verification', as
   const auth = { Authorization: `Bearer ${(await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' })).body.accessToken}` };
   expect((await request(srv).get('/api/console/test/apps').set(auth).expect(200)).body).toEqual([]);
   // the console form now sends only the service name, app name and platform
-  const slim = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID' }] }).expect(201);
+  await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID' }] }).expect(400); // package name required
+  await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'IOS', bundleId: 'bad id' }] }).expect(400);
+  const slim = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID', packageName: 'com.slim.app' }] }).expect(201);
   expect(slim.body).toMatchObject({ usagePurpose: '', expectedMonthlyRequests: 0 });
   await prisma.apiApplication.delete({ where: { id: slim.body.id } }).catch(() => undefined);
   const created = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Svc', usagePurpose: 'x', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'A', platform: 'ANDROID', packageName: 'a.b' }] }).expect(201);

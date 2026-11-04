@@ -1,5 +1,6 @@
 import { parseOrigins } from '../ars-engine/widget.service';
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -42,7 +43,20 @@ export class ApiApplicationsService {
     return application;
   }
 
+  /** Android needs the package name, iOS the Bundle ID (app identity on every API call and for app integrity). */
+  private checkApps(dto: CreateApplicationDto) {
+    for (const a of dto.apps ?? []) {
+      if (a.packageName) a.packageName = a.packageName.trim();
+      if (a.bundleId) a.bundleId = a.bundleId.trim();
+      if (a.platform === 'ANDROID' && !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(a.packageName ?? ''))
+        throw new BadRequestException('Android 패키지명을 입력하세요. (예: com.example.app)');
+      if (a.platform === 'IOS' && !/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(a.bundleId ?? ''))
+        throw new BadRequestException('iOS Bundle ID를 입력하세요. (예: com.example.app)');
+    }
+  }
+
   create(userId: string, dto: CreateApplicationDto) {
+    this.checkApps(dto);
     return this.prisma.apiApplication.create({
       data: {
         userId,
@@ -67,6 +81,7 @@ export class ApiApplicationsService {
   }
 
   async update(userId: string, id: string, dto: UpdateApplicationDto) {
+    this.checkApps(dto);
     const application = await this.getOwned(userId, id);
     if (
       !['DRAFT', 'NEEDS_REVISION'].includes(application.status)

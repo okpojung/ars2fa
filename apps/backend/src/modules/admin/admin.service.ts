@@ -139,10 +139,10 @@ export class AdminService {
       return { application: updated, apiKey };
     });
 
+    // the secret is not shown to the admin: the customer takes it in the console after an ARS phone check
     return {
       ...result,
-      rawApiKey,
-      notice: 'API Key 원문은 지금 한 번만 표시됩니다. 안전한 장소에 보관하세요.',
+      notice: '승인했습니다. 고객이 콘솔 API Key 메뉴에서 휴대폰 ARS 인증 후 키를 받습니다.',
     };
   }
 

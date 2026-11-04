@@ -20,7 +20,7 @@ export function AdminAppSecurityPage() {
       <Typography.Title level={2}>앱 보안 (위조 방지·피싱 안내)</Typography.Title>
       <Typography.Paragraph type="secondary">
         감시: 앱 무결성 검증 결과만 기록합니다. 강제: Android Play Integrity 또는 iOS App Attest를 통과한 정품 앱만 인증을 시작할 수 있습니다.
-        강제로 하려면 Android는 패키지명, iOS는 Bundle ID와 Team ID를 먼저 넣어야 합니다(고객 신청서에서는 받지 않습니다). 표시 이름은 앱 화면과 팝업에 쓰입니다.
+        강제로 하려면 Android는 패키지명, iOS는 Bundle ID와 Team ID를 먼저 넣어야 합니다(신청서에서 받은 값이며 여기서 고칠 수 있습니다). 표시 이름은 앱 화면과 팝업에 쓰입니다.
       </Typography.Paragraph>
       <Table<Record<string, any>> rowKey="id" loading={isLoading} dataSource={data ?? []}
         columns={[
@@ -36,10 +36,10 @@ export function AdminAppSecurityPage() {
           <Form.Item name="integrityPolicy" label="앱 무결성 검증"><Select options={Object.entries(POLICY).map(([value, [label]]) => ({ value, label }))} /></Form.Item>
           <Form.Item name="displayName" label="표시 이름 (피싱 방지 안내)" extra="예: 바로포인트"><Input maxLength={40} /></Form.Item>
           {editing?.platform === 'ANDROID' && (
-            <Form.Item name="packageName" label="Android 패키지명 (applicationId)" extra="예: com.hnglife.bspoint · 앱 위조 방지를 쓸 때만 필요"><Input /></Form.Item>
+            <Form.Item name="packageName" label="Android 패키지명 (applicationId)" extra="예: com.hnglife.bspoint · 인증 요청 값과 비교하고 위조 방지에도 씁니다"><Input /></Form.Item>
           )}
           {editing?.platform === 'IOS' && (
-            <Form.Item name="bundleId" label="iOS Bundle ID" extra="예: com.hnglife.bspoint · 앱 위조 방지를 쓸 때만 필요"><Input /></Form.Item>
+            <Form.Item name="bundleId" label="iOS Bundle ID" extra="예: com.hnglife.bspoint · 인증 요청 값과 비교하고 위조 방지에도 씁니다"><Input /></Form.Item>
           )}
           {editing?.platform === 'ANDROID' && (
             <Form.Item name="androidCertSha256" label="서명 인증서 SHA-256 (Play Integrity 값, 쉼표로 여러 개)"><Input /></Form.Item>

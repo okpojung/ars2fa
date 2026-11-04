@@ -11,7 +11,7 @@ export function AdminApplicationsPage() {
   const approve = useMutation({
     mutationFn: async (id: string) => (await apiClient.post(`/admin/applications/${id}/approve`, {})).data,
     onSuccess: (data) => {
-      message.success(`승인 완료. API Key: ${data.rawApiKey}`);
+      message.success('승인했습니다. 고객이 콘솔에서 휴대폰 ARS 인증 후 키를 받습니다.');
       queryClient.invalidateQueries({ queryKey: ['admin-applications'] });
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '승인 실패'),

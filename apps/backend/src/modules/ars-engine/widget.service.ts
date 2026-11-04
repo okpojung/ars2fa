@@ -123,13 +123,21 @@ export class WidgetService {
    * finished within 15 minutes. Marks it used.
    */
   async consumeSignupPhone(sessionId: string | undefined, contactPhone: string) {
+    return this.consumePhoneCheck(sessionId, 'ARS2FA-SIGNUP', contactPhone, 15, '인증한 휴대폰 번호와 담당자 연락처가 다릅니다.');
+  }
+
+  /**
+   * One-time ARS phone check of a built-in app: verified session of that app, same phone, finished within
+   * maxAgeMin minutes, not used before. Marks it used and returns the phone.
+   */
+  async consumePhoneCheck(sessionId: string | undefined, appName: string, expectedPhone: string, maxAgeMin: number, mismatchMsg: string) {
     const fail = (m: string) => new BadRequestException({ code: 'PHONE_NOT_VERIFIED', message: m });
     if (!sessionId || !/^ars_[A-Za-z0-9_-]{10,40}$/.test(sessionId)) throw fail('휴대폰 인증을 완료해 주세요.');
     const s = await this.prisma.arsSession.findUnique({ where: { sessionId }, include: { applicationApp: true } });
-    if (!s || s.applicationApp.mobileAppName !== 'ARS2FA-SIGNUP' || s.status !== 'VERIFIED' || !s.callerPhoneEnc) throw fail('휴대폰 인증을 완료해 주세요.');
-    if (!s.finishedAt || Date.now() - s.finishedAt.getTime() > 15 * 60_000) throw fail('휴대폰 인증 시간이 지났습니다. 다시 인증해 주세요.');
+    if (!s || s.applicationApp.mobileAppName !== appName || s.status !== 'VERIFIED' || !s.callerPhoneEnc) throw fail('휴대폰 인증을 완료해 주세요.');
+    if (!s.finishedAt || Date.now() - s.finishedAt.getTime() > maxAgeMin * 60_000) throw fail('휴대폰 인증 시간이 지났습니다. 다시 인증해 주세요.');
     const phone = openText(s.callerPhoneEnc);
-    if (phone !== normalizeKrPhone(contactPhone)) throw fail('인증한 휴대폰 번호와 담당자 연락처가 다릅니다.');
+    if (phone !== normalizeKrPhone(expectedPhone)) throw fail(mismatchMsg);
     const r = await this.prisma.arsSession.updateMany({ where: { id: s.id, widgetConsumedAt: null }, data: { widgetConsumedAt: new Date() } });
     if (r.count === 0) throw fail('이미 사용한 휴대폰 인증입니다. 다시 인증해 주세요.');
     return phone;
