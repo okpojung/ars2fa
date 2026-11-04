@@ -10,7 +10,7 @@ export function ApiKeyListPage() {
     <>
       <Typography.Title level={2}>API Key</Typography.Title>
       <Typography.Paragraph type="secondary">
-        API 신청이 승인되면 키가 만들어집니다. [키 발급]을 누르고 담당자 휴대폰으로 ARS 인증을 하면 키 원문이 한 번만 표시됩니다. 재발급하면 이전 키는 바로 쓸 수 없게 됩니다.
+        API 신청이 승인되면 키가 만들어집니다. [키 보기]를 누르고 담당자 휴대폰(가입할 때 인증한 번호)으로 ARS 인증을 하면 키를 볼 수 있습니다. 볼 때마다 인증이 필요합니다. 키가 밖으로 새어 나갔을 때만 키 창의 [새 키로 바꾸기]를 쓰세요.
       </Typography.Paragraph>
       <Table<Record<string, any>> rowKey="id" loading={isLoading} dataSource={data ?? []}
         columns={[
@@ -19,7 +19,7 @@ export function ApiKeyListPage() {
           { title: '환경', dataIndex: 'environment' },
           { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
           { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => v?.toLocaleString() },
-          { title: '', render: (_, r) => r.status !== 'REVOKED' && <RotateKeyButton id={r.id} issued={r.updatedAt !== r.createdAt} /> },
+          { title: '', render: (_, r) => r.status !== 'REVOKED' && <RotateKeyButton id={r.id} viewable={r.viewable} /> },
         ]} />
     </>
   );

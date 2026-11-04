@@ -128,6 +128,18 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot.body.apiKey}`).send(id).expect(401);
   expect(rot2.body.apiKey).not.toBe(rot.body.apiKey);
 
+  // view the issued key again: ARS check first, same key, never in lists
+  const listed = await request(srv).get('/api/api-keys').set(auth).expect(200);
+  expect(listed.body.find((k: { id: string }) => k.id === keyRow.id)).toMatchObject({ viewable: true });
+  expect(JSON.stringify(listed.body)).not.toContain('keyEnc');
+  expect(JSON.stringify(listed.body)).not.toContain(rot2.body.apiKey);
+  await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({}).expect(400);
+  const kp3 = await request(srv).post('/api/console/api-keys/phone/start').set(auth).set('Origin', 'https://ars2fa.baro.me').expect(201);
+  await completePcCall(kp3.body.session_id, '01000000000', 'key.3');
+  const seen = await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp3.body.session_id }).expect(201);
+  expect(seen.body.apiKey).toBe(rot2.body.apiKey);
+  await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp3.body.session_id }).expect(400); // one use
+
   const mine = await request(srv).get('/api/console/sessions').set(auth).expect(200);
   expect(mine.body).toHaveLength(2);
   expect(JSON.stringify(mine.body)).not.toMatch(/callerPhoneEnc|pcCode|dialToken/);

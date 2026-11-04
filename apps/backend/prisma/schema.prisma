@@ -211,6 +211,8 @@ model ApiKey {
   applicationId      String
   keyPrefix          String
   keyHash            String            @unique
+  /// the key itself, AES-GCM sealed (shown again in the console after an ARS phone check); null = older key, hash only
+  keyEnc             String?
   environment        ApiKeyEnvironment @default(TEST)
   status             ApiKeyStatus      @default(ACTIVE)
   monthlyLimit       Int               @default(10000)

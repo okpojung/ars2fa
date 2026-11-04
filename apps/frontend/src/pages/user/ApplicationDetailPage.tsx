@@ -72,7 +72,7 @@ export function ApplicationDetailPage() {
               { title: '환경', dataIndex: 'environment' },
               { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
               { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => v?.toLocaleString() },
-              { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} issued={k.updatedAt !== k.createdAt} /> },
+              { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} viewable={k.viewable} /> },
             ]} />
         )}
       </Card>

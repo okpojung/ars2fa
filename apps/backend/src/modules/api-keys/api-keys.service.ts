@@ -10,8 +10,15 @@ export class ApiKeysService {
     private readonly redis: RedisService,
   ) {}
 
-  listForUser(userId: string) {
-    return this.prisma.apiKey.findMany({
+  /** viewable: the key is kept sealed and can be shown again after an ARS phone check (the key itself is never listed). */
+  private async withViewable<T extends { id: string }>(rows: T[]) {
+    const sealed = await this.prisma.apiKey.findMany({ where: { id: { in: rows.map((r) => r.id) }, keyEnc: { not: null } }, select: { id: true } });
+    const ids = new Set(sealed.map((s) => s.id));
+    return rows.map((r) => ({ ...r, viewable: ids.has(r.id) }));
+  }
+
+  async listForUser(userId: string) {
+    return this.withViewable(await this.prisma.apiKey.findMany({
       where: { application: { userId } },
       include: {
         application: {
@@ -19,7 +26,7 @@ export class ApiKeysService {
         },
       },
       orderBy: { createdAt: 'desc' },
-    });
+    }));
   }
 
   async getForUser(userId: string, id: string) {
@@ -30,7 +37,7 @@ export class ApiKeysService {
     if (!apiKey) {
       throw new NotFoundException('API Key not found');
     }
-    return apiKey;
+    return (await this.withViewable([apiKey]))[0];
   }
 
   adminList() {

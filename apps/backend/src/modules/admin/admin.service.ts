@@ -1,3 +1,4 @@
+import { sealText } from '../ars-engine/phone.util';
 import {
   ForbiddenException,
   Injectable,
@@ -110,6 +111,7 @@ export class AdminService {
           applicationId,
           keyHash,
           keyPrefix: getKeyPrefix(rawApiKey),
+          keyEnc: sealText(rawApiKey),
           environment: 'TEST',
           status: 'ACTIVE',
           // monthly limit: default unless the (old) application form gave a number; adjustable in API Key 운영

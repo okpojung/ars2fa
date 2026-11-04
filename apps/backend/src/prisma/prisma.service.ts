@@ -15,7 +15,7 @@ export class PrismaService
     });
     // Secrets are never read unless a query asks for them explicitly (omit: { field: false }):
     // responses that include users or API keys can then never leak password or key hashes.
-    super({ adapter, omit: { user: { passwordHash: true }, adminUser: { passwordHash: true }, apiKey: { keyHash: true } } });
+    super({ adapter, omit: { user: { passwordHash: true }, adminUser: { passwordHash: true }, apiKey: { keyHash: true, keyEnc: true } } });
   }
 
   async onModuleInit() {

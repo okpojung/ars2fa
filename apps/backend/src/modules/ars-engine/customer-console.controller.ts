@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { openText, sealText } from './phone.util';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
@@ -171,6 +172,22 @@ export class CustomerConsoleController {
       phone: user.contactPhone, countryCode: '82', purpose: 'API Key 발급', clientInfo: describeRequest(req) });
   }
 
+  /** Shows the issued key again after an ARS check of the account's contact phone (5 minutes, one use). */
+  @Post('api-keys/:id/reveal')
+  async reveal(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: { phoneSessionId?: string }) {
+    const userId = this.userId(req);
+    const key = await this.prisma.apiKey.findFirst({ where: { id, application: { userId } }, omit: { keyEnc: false } });
+    if (!key) throw new NotFoundException('API_KEY_NOT_FOUND');
+    if (key.status === 'REVOKED') throw new ForbiddenException('API_KEY_REVOKED');
+    if (!key.keyEnc) throw new ConflictException({ code: 'KEY_NOT_STORED', message: '이전 방식으로 만든 키라 다시 볼 수 없습니다. [키 받기]로 새 키를 받으세요.' });
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { contactPhone: true } });
+    await this.widget.consumePhoneCheck(typeof body?.phoneSessionId === 'string' ? body.phoneSessionId : undefined, 'ARS2FA-KEYISSUE',
+      user.contactPhone, 5, '인증한 휴대폰이 계정의 담당자 연락처와 다릅니다.');
+    await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'API_KEY_REVEAL', targetType: 'API_KEY', targetId: key.id,
+      details: { prefix: key.keyPrefix } } });
+    return { id: key.id, keyPrefix: key.keyPrefix, apiKey: openText(key.keyEnc) };
+  }
+
   @Post('api-keys/:id/rotate')
   async rotate(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() body: { phoneSessionId?: string }) {
     const userId = this.userId(req);
@@ -183,7 +200,7 @@ export class CustomerConsoleController {
       user.contactPhone, 5, '인증한 휴대폰이 계정의 담당자 연락처와 다릅니다.');
     const raw = generateApiKey(key.environment as 'TEST' | 'LIVE');
     const keyHash = hmacSha256(process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret', raw);
-    await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash, keyPrefix: getKeyPrefix(raw) } });
+    await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash, keyPrefix: getKeyPrefix(raw), keyEnc: sealText(raw) } });
     await this.redis.del(`api-key:${key.keyHash}`).catch(() => undefined);
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'API_KEY_ROTATE', targetType: 'API_KEY', targetId: key.id,
       details: { oldPrefix: key.keyPrefix, newPrefix: getKeyPrefix(raw) } } });
