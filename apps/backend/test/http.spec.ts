@@ -139,6 +139,20 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   const seen = await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp3.body.session_id }).expect(201);
   expect(seen.body.apiKey).toBe(rot2.body.apiKey);
   await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp3.body.session_id }).expect(400); // one use
+  expect(seen.body).toMatchObject({ replaced: false, viewsLeft: 2 });
+  // views 2 and 3 show the same key; the 4th issues a new key and the old one stops
+  for (const [i, left] of [[4, 1], [5, 0]] as const) {
+    const kp = await request(srv).post('/api/console/api-keys/phone/start').set(auth).set('Origin', 'https://ars2fa.baro.me').expect(201);
+    await completePcCall(kp.body.session_id, '01000000000', `key.${i}`);
+    const v = await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp.body.session_id }).expect(201);
+    expect(v.body).toMatchObject({ apiKey: rot2.body.apiKey, replaced: false, viewsLeft: left });
+  }
+  const kp6 = await request(srv).post('/api/console/api-keys/phone/start').set(auth).set('Origin', 'https://ars2fa.baro.me').expect(201);
+  await completePcCall(kp6.body.session_id, '01000000000', 'key.6');
+  const fourth = await request(srv).post(`/api/console/api-keys/${keyRow.id}/reveal`).set(auth).send({ phoneSessionId: kp6.body.session_id }).expect(201);
+  expect(fourth.body).toMatchObject({ replaced: true, viewsLeft: 3 });
+  expect(fourth.body.apiKey).not.toBe(rot2.body.apiKey);
+  await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot2.body.apiKey}`).send(id).expect(401);
 
   const mine = await request(srv).get('/api/console/sessions').set(auth).expect(200);
   expect(mine.body).toHaveLength(2);

@@ -31,6 +31,9 @@ export class AppSettingsDto {
 }
 
 /** Customer console (logged-in API customers): own authentication history, per-app settings, key reissue. */
+/** How many times one API key can be viewed again before the next view issues a new key. */
+export const MAX_KEY_VIEWS = 3;
+
 @ApiTags('console')
 @UseGuards(JwtAuthGuard)
 @Controller('api/console')
@@ -183,9 +186,22 @@ export class CustomerConsoleController {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { contactPhone: true } });
     await this.widget.consumePhoneCheck(typeof body?.phoneSessionId === 'string' ? body.phoneSessionId : undefined, 'ARS2FA-KEYISSUE',
       user.contactPhone, 5, '인증한 휴대폰이 계정의 담당자 연락처와 다릅니다.');
+    // up to MAX_KEY_VIEWS views per key; the view after that issues a new key (the old one stops at once)
+    const counted = await this.prisma.apiKey.updateMany({ where: { id: key.id, revealCount: { lt: MAX_KEY_VIEWS } }, data: { revealCount: { increment: 1 } } });
+    if (counted.count === 0) {
+      const raw = generateApiKey(key.environment as 'TEST' | 'LIVE');
+      const old = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: key.id }, omit: { keyHash: false } });
+      await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash: hmacSha256(process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret', raw),
+        keyPrefix: getKeyPrefix(raw), keyEnc: sealText(raw), revealCount: 0 } });
+      await this.redis.del(`api-key:${old.keyHash}`).catch(() => undefined);
+      await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'API_KEY_ROTATE', targetType: 'API_KEY', targetId: key.id,
+        details: { oldPrefix: key.keyPrefix, newPrefix: getKeyPrefix(raw), reason: 'view_limit' } } });
+      return { id: key.id, keyPrefix: getKeyPrefix(raw), apiKey: raw, replaced: true, viewsLeft: MAX_KEY_VIEWS };
+    }
+    const now = await this.prisma.apiKey.findUniqueOrThrow({ where: { id: key.id }, select: { revealCount: true } });
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'API_KEY_REVEAL', targetType: 'API_KEY', targetId: key.id,
-      details: { prefix: key.keyPrefix } } });
-    return { id: key.id, keyPrefix: key.keyPrefix, apiKey: openText(key.keyEnc) };
+      details: { prefix: key.keyPrefix, view: now.revealCount } } });
+    return { id: key.id, keyPrefix: key.keyPrefix, apiKey: openText(key.keyEnc), replaced: false, viewsLeft: MAX_KEY_VIEWS - now.revealCount };
   }
 
   @Post('api-keys/:id/rotate')
@@ -200,7 +216,7 @@ export class CustomerConsoleController {
       user.contactPhone, 5, '인증한 휴대폰이 계정의 담당자 연락처와 다릅니다.');
     const raw = generateApiKey(key.environment as 'TEST' | 'LIVE');
     const keyHash = hmacSha256(process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret', raw);
-    await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash, keyPrefix: getKeyPrefix(raw), keyEnc: sealText(raw) } });
+    await this.prisma.apiKey.update({ where: { id: key.id }, data: { keyHash, keyPrefix: getKeyPrefix(raw), keyEnc: sealText(raw), revealCount: 0 } });
     await this.redis.del(`api-key:${key.keyHash}`).catch(() => undefined);
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'API_KEY_ROTATE', targetType: 'API_KEY', targetId: key.id,
       details: { oldPrefix: key.keyPrefix, newPrefix: getKeyPrefix(raw) } } });

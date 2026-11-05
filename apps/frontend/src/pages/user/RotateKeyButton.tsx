@@ -4,14 +4,14 @@ import { useState } from 'react';
 import { apiClient } from '../../shared/api/client';
 import { runArsPopup } from '../../shared/ars/popup';
 
-type Shown = { apiKey: string; replaced: boolean };
+type Shown = { apiKey: string; replaced: boolean; viewsLeft?: number };
 
 /**
  * API key in the console: [키 보기] shows the issued key again after an ARS phone check of the account's contact
  * phone (the one verified at sign-up). Keys made before keys were kept sealed cannot be shown: [키 받기] issues a
  * new one. Replacing a key (e.g. when it leaked) is a small link in the key window, also behind the ARS check.
  */
-export function RotateKeyButton({ id, viewable }: { id: string; viewable?: boolean }) {
+export function RotateKeyButton({ id, viewable, viewsLeft }: { id: string; viewable?: boolean; viewsLeft?: number }) {
   const qc = useQueryClient();
   const [shown, setShown] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +39,8 @@ export function RotateKeyButton({ id, viewable }: { id: string; viewable?: boole
       if (!sid) return;
       try {
         const { data } = await apiClient.post(`/console/api-keys/${id}/reveal`, { phoneSessionId: sid });
-        setShown({ apiKey: data.apiKey, replaced: false });
+        setShown({ apiKey: data.apiKey, replaced: !!data.replaced, viewsLeft: data.viewsLeft });
+        void qc.invalidateQueries();
       } catch (e: any) {
         if (e?.response?.data?.code !== 'KEY_NOT_STORED') { message.error(errMsg(e)); return; }
         // older key (hash only): the same phone check can be used to issue a new key
@@ -76,7 +77,15 @@ export function RotateKeyButton({ id, viewable }: { id: string; viewable?: boole
     <>
       {viewable === false
         ? <Button size="small" type="primary" loading={busy} onClick={() => askReplace(true)}>키 받기</Button>
-        : <Button size="small" type="primary" loading={busy} onClick={() => { void view(); }}>키 보기</Button>}
+        : <Button size="small" type="primary" loading={busy} onClick={() => {
+            if (viewsLeft !== 0) { void view(); return; }
+            // 4th view: the key is replaced
+            Modal.confirm({
+              title: '이 키는 3번 봤습니다',
+              content: '이번에 보면 새 키가 발급되고 이전 키는 바로 쓸 수 없게 됩니다. 운영 중인 서버의 키도 함께 바꿔야 합니다.',
+              okText: '휴대폰 인증하고 새 키 받기', cancelText: '취소', onOk: () => { void view(); },
+            });
+          }}>{viewsLeft === 0 ? '키 보기 (새 키 발급)' : viewsLeft != null ? `키 보기 (남은 ${viewsLeft}회)` : '키 보기'}</Button>}
       <Modal open={!!shown} title={shown?.replaced ? '새 API Key' : 'API Key'} onCancel={() => setShown(null)} width={640}
         footer={<>
           {!shown?.replaced && <Button type="link" danger style={{ float: 'left' }} onClick={() => { setShown(null); askReplace(false); }}>유출이 의심되면 새 키로 바꾸기</Button>}
@@ -84,8 +93,8 @@ export function RotateKeyButton({ id, viewable }: { id: string; viewable?: boole
         </>}>
         <Alert type={shown?.replaced ? 'warning' : 'info'} showIcon style={{ marginBottom: 16 }}
           message={shown?.replaced
-            ? '새 키입니다. 이전 키는 이제 쓸 수 없으니 운영 서버의 키를 바꿔 주세요.'
-            : '키는 서버의 안전한 곳에 보관하세요. 다시 볼 때도 휴대폰 ARS 인증이 필요합니다.'} />
+            ? '새 키입니다. 이전 키는 이제 쓸 수 없으니 운영 서버의 키를 바꿔 주세요. 이 키는 다시 3번까지 볼 수 있습니다.'
+            : `키는 서버의 안전한 곳에 보관하세요. 다시 볼 때도 휴대폰 ARS 인증이 필요합니다. ${shown?.viewsLeft != null ? (shown.viewsLeft > 0 ? `앞으로 ${shown.viewsLeft}번 더 볼 수 있고, 그 다음에 보면 새 키가 발급됩니다.` : '다음에 보면 새 키가 발급되고 이 키는 막힙니다.') : ''}`} />
         <Typography.Paragraph copyable={{ text: shown?.apiKey ?? '' }} code style={{ fontSize: 15, wordBreak: 'break-all' }}>{shown?.apiKey}</Typography.Paragraph>
       </Modal>
     </>

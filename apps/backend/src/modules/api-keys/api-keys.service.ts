@@ -12,9 +12,9 @@ export class ApiKeysService {
 
   /** viewable: the key is kept sealed and can be shown again after an ARS phone check (the key itself is never listed). */
   private async withViewable<T extends { id: string }>(rows: T[]) {
-    const sealed = await this.prisma.apiKey.findMany({ where: { id: { in: rows.map((r) => r.id) }, keyEnc: { not: null } }, select: { id: true } });
-    const ids = new Set(sealed.map((s) => s.id));
-    return rows.map((r) => ({ ...r, viewable: ids.has(r.id) }));
+    const sealed = await this.prisma.apiKey.findMany({ where: { id: { in: rows.map((r) => r.id) }, keyEnc: { not: null } }, select: { id: true, revealCount: true } });
+    const left = new Map(sealed.map((s) => [s.id, Math.max(0, 3 - s.revealCount)]));
+    return rows.map((r) => ({ ...r, viewable: left.has(r.id), viewsLeft: left.get(r.id) ?? 0 }));
   }
 
   async listForUser(userId: string) {

@@ -213,6 +213,8 @@ model ApiKey {
   keyHash            String            @unique
   /// the key itself, AES-GCM sealed (shown again in the console after an ARS phone check); null = older key, hash only
   keyEnc             String?
+  /// times the current key was viewed again in the console; at the limit the next view issues a new key
+  revealCount        Int               @default(0)
   environment        ApiKeyEnvironment @default(TEST)
   status             ApiKeyStatus      @default(ACTIVE)
   monthlyLimit       Int               @default(10000)
