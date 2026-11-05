@@ -18,7 +18,7 @@ export function ApiKeyDetailPage() {
         <Descriptions.Item label="Key">{data?.keyPrefix}</Descriptions.Item>
         <Descriptions.Item label="상태"><Tag>{data?.status}</Tag></Descriptions.Item>
         <Descriptions.Item label="환경">{data?.environment}</Descriptions.Item>
-        <Descriptions.Item label="월 한도">{data?.monthlyLimit}</Descriptions.Item>
+        <Descriptions.Item label="월 한도">{data?.monthlyLimit > 0 ? Number(data.monthlyLimit).toLocaleString() : '무제한'}</Descriptions.Item>
         <Descriptions.Item label="분당 한도">{data?.rateLimitPerMinute ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="최근 사용">{data?.lastUsedAt ?? '-'}</Descriptions.Item>
       </Descriptions>

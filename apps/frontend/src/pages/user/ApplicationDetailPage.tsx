@@ -7,7 +7,7 @@ import { RotateKeyButton } from './RotateKeyButton';
 import { WebWidgetSettings } from './WebWidgetSettings';
 
 export const APPLICATION_STATUS: Record<string, string> = {
-  DRAFT: '작성 중', SUBMITTED: '심사 중', NEEDS_REVISION: '보완 요청', APPROVED: '승인', REJECTED: '반려', PENDING: '심사 대기', SUSPENDED: '정지',
+  DRAFT: '작성 중', SUBMITTED: '심사 중 (약 10분 뒤 자동 승인)', NEEDS_REVISION: '보완 요청', APPROVED: '승인', REJECTED: '반려', PENDING: '심사 대기', SUSPENDED: '정지',
 };
 
 function AppSettings({ app, defaultConfirm }: { app: Record<string, any>; defaultConfirm?: boolean }) {
@@ -71,7 +71,7 @@ export function ApplicationDetailPage() {
               { title: 'Key 앞자리', dataIndex: 'keyPrefix', render: (v) => <Typography.Text code>{v}…</Typography.Text> },
               { title: '환경', dataIndex: 'environment' },
               { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
-              { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => v?.toLocaleString() },
+              { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => (v > 0 ? Number(v).toLocaleString() : '무제한') },
               { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} viewable={k.viewable} /> },
             ]} />
         )}

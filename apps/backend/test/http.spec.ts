@@ -1,3 +1,4 @@
+import { AutoApproveService } from '../src/modules/admin/auto-approve.service';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -317,4 +318,34 @@ test('API errors: bad key 401, unknown app 403, validation 400', async () => {
 test('no number available -> 503', async () => {
   const c = await seedClient(prisma);
   await request(app.getHttpServer()).post('/v1/ars/sessions').send({ ...c.identity }).expect(503);
+});
+
+test('auto approval 10 minutes after submission; a package name of another customer waits for an admin; no monthly limit', async () => {
+  const srv = app.getHttpServer();
+  const mk = async (tag: string) => {
+    const email = `auto${tag}${Date.now()}@ex.com`;
+    await request(srv).post('/api/auth/signup').send({ email, password: 'Abcd123!', companyName: 'Co', contactName: 'N', contactPhone: '01000000000' }).expect(201);
+    const login = await request(srv).post('/api/auth/login').send({ email, password: 'Abcd123!' }).expect(201);
+    return { Authorization: `Bearer ${login.body.accessToken}` };
+  };
+  const pkg = `com.auto.t${Date.now()}`;
+  const a1 = await mk('a');
+  const first = await request(srv).post('/api/applications').set(a1).send({ serviceName: 'Auto1', apps: [{ mobileAppName: 'Auto1', platform: 'ANDROID', packageName: pkg }] }).expect(201);
+  await request(srv).post(`/api/applications/${first.body.id}/submit`).set(a1).expect(201);
+  const a2 = await mk('b');
+  const dup = await request(srv).post('/api/applications').set(a2).send({ serviceName: 'Auto2', apps: [{ mobileAppName: 'Auto2', platform: 'ANDROID', packageName: pkg }] }).expect(201);
+  await request(srv).post(`/api/applications/${dup.body.id}/submit`).set(a2).expect(201);
+  const svc = app.get(AutoApproveService);
+  await svc.tick(); // not 10 minutes yet
+  expect((await prisma.apiApplication.findUniqueOrThrow({ where: { id: first.body.id } })).status).toBe('SUBMITTED');
+  const old = new Date(Date.now() - 11 * 60_000);
+  await prisma.apiApplication.updateMany({ where: { id: { in: [first.body.id, dup.body.id] } }, data: { submittedAt: old } });
+  await svc.tick();
+  const ok = await prisma.apiApplication.findUniqueOrThrow({ where: { id: first.body.id }, include: { apiKeys: true, reviewHistories: true } });
+  expect(ok.status).toBe('APPROVED');
+  expect(ok.apiKeys[0].monthlyLimit).toBe(0);
+  expect(ok.reviewHistories[0]).toMatchObject({ adminUserId: null, toStatus: 'APPROVED' });
+  const waiting = await prisma.apiApplication.findUniqueOrThrow({ where: { id: dup.body.id } });
+  expect(waiting.status).toBe('SUBMITTED');
+  expect(waiting.adminComment).toContain('자동 승인 보류');
 });

@@ -217,7 +217,7 @@ model ApiKey {
   revealCount        Int               @default(0)
   environment        ApiKeyEnvironment @default(TEST)
   status             ApiKeyStatus      @default(ACTIVE)
-  monthlyLimit       Int               @default(10000)
+  monthlyLimit       Int               @default(0) // 0 = unlimited
   rateLimitPerMinute Int?
   lastUsedAt         DateTime?
   expiresAt          DateTime?
@@ -287,13 +287,14 @@ model AuthEvent {
 model ReviewHistory {
   id             String             @id @default(cuid())
   applicationId  String
-  adminUserId    String
+  /// null = the system (automatic approval)
+  adminUserId    String?
   fromStatus     ApplicationStatus?
   toStatus       ApplicationStatus
   comment        String?
   createdAt      DateTime           @default(now())
   application    ApiApplication     @relation(fields: [applicationId], references: [id])
-  adminUser      AdminUser          @relation(fields: [adminUserId], references: [id])
+  adminUser      AdminUser?         @relation(fields: [adminUserId], references: [id])
 }
 
 // 0507 virtual number. Every number is forwarded (once, statically) to one SKB 070 line;

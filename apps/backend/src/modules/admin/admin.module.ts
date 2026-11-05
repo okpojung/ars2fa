@@ -3,10 +3,11 @@ import { ApiApplicationsModule } from '../api-applications/api-applications.modu
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { AutoApproveService } from './auto-approve.service';
 
 @Module({
   imports: [ApiApplicationsModule, ApiKeysModule],
   controllers: [AdminController],
-  providers: [AdminService],
+  providers: [AdminService, AutoApproveService],
 })
 export class AdminModule {}

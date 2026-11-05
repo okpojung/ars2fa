@@ -77,7 +77,7 @@ export class WidgetService {
     const perKey = await this.redis.incrementWithTtl(`rate:${key.id}:${minute}`, 120);
     if (perKey > (key.rateLimitPerMinute ?? 60)) throw new HttpException('RATE_LIMIT_EXCEEDED', 429);
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    if ((await this.prisma.arsSession.count({ where: { apiKeyId: key.id, createdAt: { gte: monthStart } } })) >= key.monthlyLimit) {
+    if (key.monthlyLimit > 0 && (await this.prisma.arsSession.count({ where: { apiKeyId: key.id, createdAt: { gte: monthStart } } })) >= key.monthlyLimit) {
       throw new HttpException('MONTHLY_LIMIT_EXCEEDED', 429);
     }
     const phone = normalizeKrPhone(input.phone);

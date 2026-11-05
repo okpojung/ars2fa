@@ -29,7 +29,7 @@ export function AdminApiKeysPage() {
           { title: '서비스', render: (_, record) => record.application?.serviceName },
           { title: '회사', render: (_, record) => record.application?.user?.companyName },
           { title: '상태', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
-          { title: '월 한도', dataIndex: 'monthlyLimit' },
+          { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => (v > 0 ? Number(v).toLocaleString() : '무제한') },
           {
             title: '작업',
             render: (_, record) => (

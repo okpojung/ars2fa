@@ -47,8 +47,11 @@ export class ApiKeyAuthService {
     if (count > perMinute) throw new HttpException('RATE_LIMIT_EXCEEDED', 429);
     const month = new Date();
     const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
-    const used = await this.prisma.arsSession.count({ where: { apiKeyId: apiKey.id, createdAt: { gte: monthStart } } });
-    if (used >= apiKey.monthlyLimit) throw new HttpException('MONTHLY_LIMIT_EXCEEDED', 429);
+    // monthly limit 0 = unlimited
+    if (apiKey.monthlyLimit > 0) {
+      const used = await this.prisma.arsSession.count({ where: { apiKeyId: apiKey.id, createdAt: { gte: monthStart } } });
+      if (used >= apiKey.monthlyLimit) throw new HttpException('MONTHLY_LIMIT_EXCEEDED', 429);
+    }
     await this.prisma.apiKey.update({ where: { id: apiKey.id }, data: { lastUsedAt: new Date() } });
     return { apiKeyId: apiKey.id, app };
   }

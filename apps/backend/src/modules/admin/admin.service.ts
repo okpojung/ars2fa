@@ -78,7 +78,8 @@ export class AdminService {
     });
   }
 
-  async approve(applicationId: string, adminId: string, comment?: string) {
+  /** adminId null = automatic approval by the system */
+  async approve(applicationId: string, adminId: string | null, comment?: string) {
     const application = await this.getApplicationOrThrow(applicationId);
     if (application.status !== 'SUBMITTED') {
       throw new ForbiddenException('Only submitted applications can be approved');
@@ -115,14 +116,15 @@ export class AdminService {
           environment: 'TEST',
           status: 'ACTIVE',
           // monthly limit: default unless the (old) application form gave a number; adjustable in API Key 운영
-          monthlyLimit: application.expectedMonthlyRequests > 0 ? application.expectedMonthlyRequests : Number(process.env.DEFAULT_MONTHLY_LIMIT ?? 10000),
+          // no monthly limit for now (0 = unlimited); DEFAULT_MONTHLY_LIMIT sets one for new keys
+          monthlyLimit: Number(process.env.DEFAULT_MONTHLY_LIMIT ?? 0) || 0,
           rateLimitPerMinute: 60,
         },
       });
       await tx.reviewHistory.create({
         data: {
           applicationId,
-          adminUserId: adminId,
+          adminUserId: adminId ?? undefined,
           fromStatus: application.status,
           toStatus: 'APPROVED',
           comment,
@@ -130,9 +132,9 @@ export class AdminService {
       });
       await tx.auditLog.create({
         data: {
-          actorType: 'ADMIN',
+          actorType: adminId ? 'ADMIN' : 'SYSTEM',
           actorId: adminId,
-          action: 'APPLICATION_APPROVE_AND_KEY_ISSUE',
+          action: adminId ? 'APPLICATION_APPROVE_AND_KEY_ISSUE' : 'APPLICATION_AUTO_APPROVE',
           targetType: 'API_APPLICATION',
           targetId: applicationId,
           details: { apiKeyId: apiKey.id, keyPrefix: apiKey.keyPrefix },
