@@ -10,8 +10,15 @@ export class ApiKeysService {
     private readonly redis: RedisService,
   ) {}
 
-  listForUser(userId: string) {
-    return this.prisma.apiKey.findMany({
+  /** viewable: the key is kept sealed and can be shown again after an ARS phone check (the key itself is never listed). */
+  private async withViewable<T extends { id: string }>(rows: T[]) {
+    const sealed = await this.prisma.apiKey.findMany({ where: { id: { in: rows.map((r) => r.id) }, keyEnc: { not: null } }, select: { id: true, revealCount: true } });
+    const left = new Map(sealed.map((s) => [s.id, Math.max(0, 3 - s.revealCount)]));
+    return rows.map((r) => ({ ...r, viewable: left.has(r.id), viewsLeft: left.get(r.id) ?? 0 }));
+  }
+
+  async listForUser(userId: string) {
+    return this.withViewable(await this.prisma.apiKey.findMany({
       where: { application: { userId } },
       include: {
         application: {
@@ -19,7 +26,7 @@ export class ApiKeysService {
         },
       },
       orderBy: { createdAt: 'desc' },
-    });
+    }));
   }
 
   async getForUser(userId: string, id: string) {
@@ -30,7 +37,7 @@ export class ApiKeysService {
     if (!apiKey) {
       throw new NotFoundException('API Key not found');
     }
-    return apiKey;
+    return (await this.withViewable([apiKey]))[0];
   }
 
   adminList() {
@@ -48,7 +55,7 @@ export class ApiKeysService {
   }
 
   async changeStatus(id: string, status: ApiKeyStatus, adminId: string) {
-    const apiKey = await this.prisma.apiKey.findUnique({ where: { id } });
+    const apiKey = await this.prisma.apiKey.findUnique({ where: { id }, omit: { keyHash: false } });
     if (!apiKey) {
       throw new NotFoundException('API Key not found');
     }
@@ -77,12 +84,14 @@ export class ApiKeysService {
   ) {
     const updated = await this.prisma.apiKey.update({
       where: { id },
+      omit: { keyHash: false },
       data: {
         monthlyLimit: dto.monthlyLimit,
         rateLimitPerMinute: dto.rateLimitPerMinute,
       },
     });
-    await this.redis.del(`api-key:${updated.keyHash}`);
-    return updated;
+    const { keyHash, ...rest } = updated;
+    await this.redis.del(`api-key:${keyHash}`);
+    return rest;
   }
 }

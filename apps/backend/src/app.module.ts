@@ -4,7 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ApiApplicationsModule } from './modules/api-applications/api-applications.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
-import { ArsGatewayModule } from './modules/ars-gateway/ars-gateway.module';
+import { ArsEngineModule } from './modules/ars-engine/ars-engine.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthRequestsModule } from './modules/auth-requests/auth-requests.module';
 import { HealthModule } from './modules/health/health.module';
@@ -18,7 +18,7 @@ import { StatisticsModule } from './modules/statistics/statistics.module';
     ApiApplicationsModule,
     ApiKeysModule,
     AdminModule,
-    ArsGatewayModule,
+    ArsEngineModule,
     AuthRequestsModule,
     StatisticsModule,
     HealthModule,
