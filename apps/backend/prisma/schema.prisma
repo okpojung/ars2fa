@@ -215,7 +215,7 @@ model ApiKey {
   keyEnc             String?
   /// times the current key was viewed again in the console; at the limit the next view issues a new key
   revealCount        Int               @default(0)
-  environment        ApiKeyEnvironment @default(TEST)
+  environment        ApiKeyEnvironment @default(LIVE)
   status             ApiKeyStatus      @default(ACTIVE)
   monthlyLimit       Int               @default(0) // 0 = unlimited
   rateLimitPerMinute Int?

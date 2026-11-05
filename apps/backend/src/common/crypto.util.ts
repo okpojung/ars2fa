@@ -5,8 +5,9 @@ export function hmacSha256(secret: string, value: string): string {
 }
 
 export function generateApiKey(environment: 'TEST' | 'LIVE' = 'TEST'): string {
-  const prefix = environment === 'LIVE' ? 'ars2fa_live_' : 'ars2fa_test_';
-  return `${prefix}${randomBytes(32).toString('base64url')}`;
+  // one key format for every key: ars2fa_<43 random chars> (no test/live marker); environment kept for compatibility
+  void environment;
+  return `ars2fa_${randomBytes(32).toString('base64url')}`;
 }
 
 export function getKeyPrefix(apiKey: string): string {

@@ -16,7 +16,6 @@ export function ApiKeyListPage() {
         columns={[
           { title: '서비스', render: (_, r) => <Link to={`/console/applications/${r.applicationId}`}>{r.application?.serviceName}</Link> },
           { title: 'Key 앞자리', dataIndex: 'keyPrefix', render: (v) => <Typography.Text code>{v}…</Typography.Text> },
-          { title: '환경', dataIndex: 'environment' },
           { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
           { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => (v > 0 ? Number(v).toLocaleString() : '무제한') },
           { title: '', render: (_, r) => r.status !== 'REVOKED' && <RotateKeyButton id={r.id} viewable={r.viewable} viewsLeft={r.viewsLeft} /> },

@@ -85,7 +85,7 @@ export class AdminService {
       throw new ForbiddenException('Only submitted applications can be approved');
     }
 
-    const rawApiKey = generateApiKey('TEST');
+    const rawApiKey = generateApiKey('LIVE');
     const keyHash = hmacSha256(
       process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret',
       rawApiKey,
@@ -113,7 +113,7 @@ export class AdminService {
           keyHash,
           keyPrefix: getKeyPrefix(rawApiKey),
           keyEnc: sealText(rawApiKey),
-          environment: 'TEST',
+          environment: 'LIVE',
           status: 'ACTIVE',
           // monthly limit: default unless the (old) application form gave a number; adjustable in API Key 운영
           // no monthly limit for now (0 = unlimited); DEFAULT_MONTHLY_LIMIT sets one for new keys
