@@ -1,9 +1,11 @@
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -29,6 +31,18 @@ export class ApplicationAppDto {
   @IsOptional()
   @IsString()
   storeUrl?: string;
+
+  /** ANDROID / IOS: press 1 after the notice (null / omitted = service default) */
+  @IsOptional()
+  @IsBoolean()
+  confirmKeyRequired?: boolean;
+
+  /** WEB: digits of the code shown in the popup, 3..6 (omitted = service default) */
+  @IsOptional()
+  @IsInt()
+  @Min(3)
+  @Max(6)
+  pcCodeDigits?: number;
 
   /** WEB: origins allowed to use the widget, comma separated (https://example.com) */
   @IsOptional()

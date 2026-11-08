@@ -248,7 +248,8 @@ test('customer console live test: own approved app, popup, own verification', as
   // the console form now sends only the service name, app name and platform
   await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID' }] }).expect(400); // package name required
   await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'IOS', bundleId: 'bad id' }] }).expect(400);
-  const slim = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID', packageName: 'com.slim.app' }] }).expect(201);
+  const slim = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Slim', apps: [{ mobileAppName: 'Slim', platform: 'ANDROID', packageName: 'com.slim.app', confirmKeyRequired: false, pcCodeDigits: 5 }] }).expect(201);
+  expect(slim.body.apps[0]).toMatchObject({ confirmKeyRequired: false, pcCodeDigits: null }); // digits only for web
   expect(slim.body).toMatchObject({ usagePurpose: '', expectedMonthlyRequests: 0 });
   await prisma.apiApplication.delete({ where: { id: slim.body.id } }).catch(() => undefined);
   const created = await request(srv).post('/api/applications').set(auth).send({ serviceName: 'Svc', usagePurpose: 'x', expectedMonthlyRequests: 100, apps: [{ mobileAppName: 'A', platform: 'ANDROID', packageName: 'a.b' }] }).expect(201);
