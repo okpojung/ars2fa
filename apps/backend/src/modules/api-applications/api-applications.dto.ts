@@ -44,6 +44,20 @@ export class ApplicationAppDto {
   @Max(6)
   pcCodeDigits?: number;
 
+  /** time to place the call, seconds 15..120 (omitted = service default) */
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(120)
+  leaseSeconds?: number;
+
+  /** WEB: time to key in the code, seconds 10..60 (omitted = service default) */
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(60)
+  pcCodeSeconds?: number;
+
   /** WEB: origins allowed to use the widget, comma separated (https://example.com) */
   @IsOptional()
   @IsString()

@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, Select, Typography, message } from 'antd';
+import { Button, Card, Form, Input, InputNumber, Select, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../../shared/api/client';
 
@@ -14,6 +14,8 @@ export function ApplicationFormPage() {
     bundleId?: string;
     confirm?: 'default' | 'on' | 'off';
     digits?: string;
+    leaseSeconds?: number | null;
+    pcCodeSeconds?: number | null;
   }) {
     try {
       const { data } = await apiClient.post('/applications', {
@@ -26,6 +28,8 @@ export function ApplicationFormPage() {
             bundleId: values.platform === 'IOS' ? values.bundleId?.trim() : undefined,
             confirmKeyRequired: values.platform !== 'WEB' && values.confirm && values.confirm !== 'default' ? values.confirm === 'on' : undefined,
             pcCodeDigits: values.platform === 'WEB' && values.digits && values.digits !== 'default' ? Number(values.digits) : undefined,
+            leaseSeconds: values.leaseSeconds ?? undefined,
+            pcCodeSeconds: values.platform === 'WEB' ? values.pcCodeSeconds ?? undefined : undefined,
             allowedOrigins: values.platform === 'WEB' ? values.allowedOrigins : undefined,
           },
         ],
@@ -65,15 +69,24 @@ export function ApplicationFormPage() {
           ) : null}
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(a, b) => a.platform !== b.platform}>
-          {({ getFieldValue }) => getFieldValue('platform') === 'WEB' ? (
+          {({ getFieldValue }) => getFieldValue('platform') === 'WEB' ? (<>
+            <Form.Item name="leaseSeconds" label="전화 걸 수 있는 시간" extra="QR을 찍고 전화를 걸 수 있는 시간(20~120초). 비워 두면 기본값(30초).">
+              <InputNumber min={20} max={120} addonAfter="초" placeholder="기본 30" style={{ width: 160 }} />
+            </Form.Item>
+            <Form.Item name="pcCodeSeconds" label="인증번호 입력 시간" extra="전화가 연결된 뒤 화면의 숫자를 휴대폰 키패드로 누를 수 있는 시간(10~60초). 비워 두면 기본값(15초).">
+              <InputNumber min={10} max={60} addonAfter="초" placeholder="기본 15" style={{ width: 160 }} />
+            </Form.Item>
             <Form.Item name="digits" label="인증번호 자릿수" extra="PC 화면(팝업)에 보여 주고 휴대폰 키패드로 누르는 숫자의 자릿수입니다. 신청 후에도 신청 상세에서 바꿀 수 있습니다.">
               <Select style={{ width: 200 }} options={[{ value: 'default', label: '기본값 (3자리)' }, ...[3, 4, 5, 6].map((n) => ({ value: String(n), label: `${n}자리` }))]} />
             </Form.Item>
-          ) : (
+          </>) : (<>
+            <Form.Item name="leaseSeconds" label="전화 걸 수 있는 시간" extra="앱이 인증 번호로 전화를 걸 수 있는 시간(15~120초). 비워 두면 기본값(30초).">
+              <InputNumber min={15} max={120} addonAfter="초" placeholder="기본 30" style={{ width: 160 }} />
+            </Form.Item>
             <Form.Item name="confirm" label="1번 누르기" extra="켜면 '휴대폰 인증을 하시려면 1번을 누르세요' 안내 후 1번을 눌러야 인증됩니다. 끄면 연결 즉시 인증합니다. 신청 후에도 바꿀 수 있습니다.">
               <Select style={{ width: 200 }} options={[{ value: 'default', label: '기본값 (켬)' }, { value: 'on', label: '켬 (안내 후 1번)' }, { value: 'off', label: '끔 (바로 인증)' }]} />
             </Form.Item>
-          )}
+          </>)}
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(a, b) => a.platform !== b.platform}>
           {({ getFieldValue }) => getFieldValue('platform') === 'WEB' ? (

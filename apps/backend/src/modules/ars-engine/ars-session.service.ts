@@ -106,7 +106,8 @@ export class ArsSessionService {
     const integrity = await this.integrity.evaluate(client.app, client.apiKeyId, body);
 
     const reqType = body.type == null ? null : Number(body.type);
-    const ttl = mode === 'PC' ? s.leaseSecondsPc : s.leaseSecondsApp;
+    // call window: the app's own setting (per API key), otherwise the service default
+    const ttl = client.app.leaseSeconds ?? (mode === 'PC' ? s.leaseSecondsPc : s.leaseSecondsApp);
     // forwarding on only for this session; switched off at expiresAt or when the call is over
     const { leased, expiresAt } = await this.leaseAndLink(ttl, s.cooldownSeconds);
     const sessionId = `ars_${randomBytes(15).toString('base64url')}`;
@@ -120,7 +121,7 @@ export class ArsSessionService {
         sessionId, apiKeyId: client.apiKeyId, applicationAppId: client.app.id, mobileAppName: client.app.mobileAppName,
         displayName: client.app.displayName || client.app.mobileAppName, clientPlatform: client.app.platform, mode,
         appsid: body.appsid?.slice(0, 100), purpose: body.purpose ?? null, vnId: leased.vnId, vn: leased.vn, rn: leased.rn,
-        expectedPhoneHash: expectedHash, pcCode, dialToken, pcCodeSeconds: mode === 'PC' ? s.pcCodeSeconds : null,
+        expectedPhoneHash: expectedHash, pcCode, dialToken, pcCodeSeconds: mode === 'PC' ? client.app.pcCodeSeconds ?? s.pcCodeSeconds : null,
         // press-1 after the notice: the request's type (0/1) first, then the customer's per-app choice, then the customer / system default
         confirmKey: mode === 'APP' ? (reqType != null ? reqType === 1 : (client.app.confirmKeyRequired ?? s.confirmKeyRequired)) : false,
         integrityVerdict: integrity.verdict, integrityDetail: integrity.detail as Prisma.InputJsonValue, expiresAt,

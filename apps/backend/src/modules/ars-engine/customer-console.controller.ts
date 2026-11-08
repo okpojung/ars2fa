@@ -28,6 +28,10 @@ export class AppSettingsDto {
   @IsOptional() @IsString() @MaxLength(40) displayName?: string;
   /** WEB: digits of the code shown in the popup, 3..6; null = account / service default */
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(3) @Max(6) pcCodeDigits?: number | null;
+  /** time to place the call, seconds (app 15..120, web 20..120); null = service default */
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(15) @Max(120) leaseSeconds?: number | null;
+  /** WEB: time to key in the code, seconds 10..60; null = service default */
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(10) @Max(60) pcCodeSeconds?: number | null;
   /** WEB: origins allowed to use the widget (comma separated) */
   @IsOptional() @IsString() @MaxLength(1000) allowedOrigins?: string;
 }
@@ -103,7 +107,16 @@ export class CustomerConsoleController {
     const userId = this.userId(req);
     const app = await this.prisma.applicationApp.findFirst({ where: { id: appId, application: { userId } } });
     if (!app) throw new NotFoundException('APP_NOT_FOUND');
-    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null; allowedOrigins?: string | null; pcCodeDigits?: number | null } = {};
+    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null; allowedOrigins?: string | null; pcCodeDigits?: number | null;
+      leaseSeconds?: number | null; pcCodeSeconds?: number | null } = {};
+    if (dto.leaseSeconds !== undefined) {
+      if (dto.leaseSeconds !== null && app.platform === 'WEB' && dto.leaseSeconds < 20) throw new BadRequestException('leaseSeconds must be 20..120 for websites');
+      data.leaseSeconds = dto.leaseSeconds;
+    }
+    if (dto.pcCodeSeconds !== undefined) {
+      if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
+      data.pcCodeSeconds = dto.pcCodeSeconds;
+    }
     if (dto.pcCodeDigits !== undefined) {
       if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
       data.pcCodeDigits = dto.pcCodeDigits;
@@ -117,9 +130,9 @@ export class CustomerConsoleController {
     if (dto.confirmKeyRequired !== undefined) data.confirmKeyRequired = dto.confirmKeyRequired;
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     const updated = await this.prisma.applicationApp.update({ where: { id: app.id }, data,
-      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, pcCodeDigits: true, integrityPolicy: true, status: true, allowedOrigins: true, siteKey: true } });
+      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, pcCodeDigits: true, leaseSeconds: true, pcCodeSeconds: true, integrityPolicy: true, status: true, allowedOrigins: true, siteKey: true } });
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'APP_SETTINGS_UPDATE', targetType: 'APPLICATION_APP', targetId: app.id,
-      details: { before: { confirmKeyRequired: app.confirmKeyRequired, pcCodeDigits: app.pcCodeDigits, displayName: app.displayName }, after: data } as never } });
+      details: { before: { confirmKeyRequired: app.confirmKeyRequired, pcCodeDigits: app.pcCodeDigits, leaseSeconds: app.leaseSeconds, pcCodeSeconds: app.pcCodeSeconds, displayName: app.displayName }, after: data } as never } });
     return updated;
   }
 

@@ -325,7 +325,12 @@ describe('call verification', () => {
     await prisma.applicationApp.update({ where: { id: app.id }, data: { pcCodeDigits: 5 } });
     const r2 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { mode: 'PC', expected_phone: '01097111104' });
     expect((await vnOf(r2.session_id)).pcCode).toMatch(/^[0-9]{5}$/);
-    await prisma.applicationApp.update({ where: { id: app.id }, data: { pcCodeDigits: null } });
+    // per-app call window and code entry time
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { pcCodeDigits: null, leaseSeconds: 45, pcCodeSeconds: 20 } });
+    const r3 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { mode: 'PC', expected_phone: '01097111104' });
+    expect(r3.expires_in).toBe(45);
+    expect((await vnOf(r3.session_id)).pcCodeSeconds).toBe(20);
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { leaseSeconds: null, pcCodeSeconds: null } });
   });
 
   test('request type overrides the app setting: 0 = no key press, 1 = press 1', async () => {

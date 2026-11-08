@@ -189,6 +189,10 @@ model ApplicationApp {
   confirmKeyRequired Boolean?
   /// WEB: digits of the code shown in the popup (null = account / service default)
   pcCodeDigits       Int?
+  /// time to place the call after the request, seconds (app 15..120, web 20..120; null = service default)
+  leaseSeconds       Int?
+  /// WEB: time to key in the code after the call connects, seconds 10..60 (null = service default)
+  pcCodeSeconds      Int?
   // WEB: public site key for widget.js and the origins allowed to use it (comma separated, e.g. https://lee.baro.me)
   siteKey        String?         @unique
   allowedOrigins String?

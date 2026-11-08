@@ -18,6 +18,7 @@ export function AppSettingText({ a, defaults }: { a: Record<string, any>; defaul
     return (
       <Space direction="vertical" size={0}>
         <span>인증번호 {digits}자리{a.pcCodeDigits ? '' : ' (기본값)'}</span>
+        <Typography.Text style={{ fontSize: 12 }}>전화 {a.leaseSeconds ?? defaults?.pcCallWindowSeconds ?? 30}초 · 입력 {a.pcCodeSeconds ?? defaults?.pcCodeSeconds ?? 15}초</Typography.Text>
         <Typography.Text type={sites.length ? undefined : 'danger'} style={{ fontSize: 12 }}>
           허용 사이트: {sites.length ? sites.join(', ') : '없음 (등록 필요)'}
         </Typography.Text>
@@ -29,6 +30,7 @@ export function AppSettingText({ a, defaults }: { a: Record<string, any>; defaul
   return (
     <Space direction="vertical" size={0}>
       <span>1번 누르기 {on ? '켬' : '끔 (바로 인증)'}{a.confirmKeyRequired === null || a.confirmKeyRequired === undefined ? ' (기본값)' : ''}</span>
+      <Typography.Text style={{ fontSize: 12 }}>전화 {a.leaseSeconds ?? defaults?.callWindowSeconds ?? 30}초</Typography.Text>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>{a.platform === 'IOS' ? 'Bundle ID' : '패키지'}: {a.packageName ?? a.bundleId ?? '-'}</Typography.Text>
     </Space>
   );
