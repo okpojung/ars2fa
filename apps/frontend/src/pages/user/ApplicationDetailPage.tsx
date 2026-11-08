@@ -1,34 +1,98 @@
-import { Card, Descriptions, List, Tag, Typography } from 'antd';
-import { useQuery } from '@tanstack/react-query';
+import { Button, Card, Descriptions, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiClient } from '../../shared/api/client';
+import { RotateKeyButton } from './RotateKeyButton';
+import { WebWidgetSettings } from './WebWidgetSettings';
+
+export const APPLICATION_STATUS: Record<string, string> = {
+  DRAFT: '작성 중', SUBMITTED: '심사 중 (약 10분 뒤 자동 승인)', NEEDS_REVISION: '보완 요청', APPROVED: '승인', REJECTED: '반려', PENDING: '심사 대기', SUSPENDED: '정지',
+};
+
+function AppSettings({ app, defaults }: { app: Record<string, any>; defaults?: Record<string, any> }) {
+  const qc = useQueryClient();
+  const initial = app.confirmKeyRequired === null || app.confirmKeyRequired === undefined ? 'default' : app.confirmKeyRequired ? 'on' : 'off';
+  const [confirm, setConfirm] = useState<string>(initial);
+  const [name, setName] = useState<string>(app.displayName ?? '');
+  const [digits, setDigits] = useState<string>(app.pcCodeDigits ? String(app.pcCodeDigits) : 'default');
+  const web = app.platform === 'WEB';
+  const [lease, setLease] = useState<number | null>(app.leaseSeconds ?? null);
+  const [codeSec, setCodeSec] = useState<number | null>(app.pcCodeSeconds ?? null);
+  const defLease = web ? defaults?.pcCallWindowSeconds ?? 30 : defaults?.callWindowSeconds ?? 30;
+  const save = useMutation({
+    mutationFn: async () => (await apiClient.patch(`/console/apps/${app.id}/settings`, web
+      ? { pcCodeDigits: digits === 'default' ? null : Number(digits), leaseSeconds: lease, pcCodeSeconds: codeSec, displayName: name }
+      : { confirmKeyRequired: confirm === 'default' ? null : confirm === 'on', leaseSeconds: lease, displayName: name })).data,
+    onSuccess: () => { message.success('저장했습니다. 다음 인증부터 적용됩니다.'); qc.invalidateQueries({ queryKey: ['application'] }); },
+    onError: (e) => message.error((e as Error).message),
+  });
+  return (
+    <Space wrap>
+      <span>안내 서비스 이름</span>
+      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={app.mobileAppName} maxLength={40} style={{ width: 170 }} />
+      <span>전화 걸 수 있는 시간</span>
+      <InputNumber value={lease} onChange={(v) => setLease(v ?? null)} min={web ? 20 : 15} max={120} placeholder={`기본 ${defLease}`} addonAfter="초" style={{ width: 130 }} />
+      {web ? (<>
+        <span>인증번호 입력 시간</span>
+        <InputNumber value={codeSec} onChange={(v) => setCodeSec(v ?? null)} min={10} max={60} placeholder={`기본 ${defaults?.pcCodeSeconds ?? 15}`} addonAfter="초" style={{ width: 130 }} />
+        <span>인증번호 자릿수</span>
+        <Select value={digits} onChange={setDigits} style={{ width: 160 }} options={[
+          { value: 'default', label: `기본값 (${defaults?.pcCodeDigits ?? 3}자리)` },
+          ...[3, 4, 5, 6].map((n) => ({ value: String(n), label: `${n}자리` })),
+        ]} />
+      </>) : (<>
+        <span>1번 누르기</span>
+        <Select value={confirm} onChange={setConfirm} style={{ width: 190 }} options={[
+          { value: 'default', label: `기본값 (${defaults?.confirmKeyRequired === false ? '끔' : '켬'})` },
+          { value: 'on', label: '켬 (안내 후 1번)' },
+          { value: 'off', label: '끔 (바로 인증)' },
+        ]} />
+      </>)}
+      <Button type="primary" size="small" loading={save.isPending} onClick={() => save.mutate()}>저장</Button>
+    </Space>
+  );
+}
 
 export function ApplicationDetailPage() {
   const { id } = useParams();
-  const { data } = useQuery({
-    queryKey: ['application', id],
-    queryFn: async () => (await apiClient.get(`/applications/${id}`)).data,
-    enabled: Boolean(id),
-  });
-
+  const { data } = useQuery({ queryKey: ['application', id], queryFn: async () => (await apiClient.get(`/applications/${id}`)).data, enabled: Boolean(id) });
+  const { data: defaults } = useQuery({ queryKey: ['console-defaults'], queryFn: async () => (await apiClient.get('/console/defaults')).data });
   return (
-    <Card>
-      <Typography.Title level={2}>신청 상세</Typography.Title>
-      <Descriptions bordered column={1}>
-        <Descriptions.Item label="서비스명">{data?.serviceName}</Descriptions.Item>
-        <Descriptions.Item label="상태"><Tag>{data?.status}</Tag></Descriptions.Item>
-        <Descriptions.Item label="사용 목적">{data?.usagePurpose}</Descriptions.Item>
-        <Descriptions.Item label="관리자 의견">{data?.adminComment ?? '-'}</Descriptions.Item>
-      </Descriptions>
-      <Typography.Title level={4} style={{ marginTop: 24 }}>앱 정보</Typography.Title>
-      <List
-        dataSource={data?.apps ?? []}
-        renderItem={(app: { mobileAppName: string; platform: string; status: string }) => (
-          <List.Item>
-            {app.mobileAppName} / {app.platform} <Tag>{app.status}</Tag>
-          </List.Item>
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Card>
+        <Typography.Title level={3} style={{ marginTop: 0 }}>{data?.serviceName}</Typography.Title>
+        <Descriptions bordered column={2} size="small">
+          <Descriptions.Item label="상태"><Tag color={data?.status === 'APPROVED' ? 'green' : undefined}>{APPLICATION_STATUS[data?.status] ?? data?.status}</Tag></Descriptions.Item>
+          <Descriptions.Item label="관리자 의견" span={2}>{data?.adminComment ?? '-'}</Descriptions.Item>
+        </Descriptions>
+      </Card>
+      <Card title="앱 설정">
+        <Table<Record<string, any>> rowKey="id" pagination={false} dataSource={data?.apps ?? []}
+          columns={[
+            { title: '앱', render: (_, a) => <><b>{a.mobileAppName}</b> <Tag>{a.platform}</Tag><br /><Typography.Text type="secondary">{a.packageName ?? a.bundleId ?? ''}</Typography.Text></> },
+            { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'APPROVED' ? 'green' : undefined}>{APPLICATION_STATUS[v] ?? v}</Tag> },
+            { title: '앱 위조 방지', dataIndex: 'integrityPolicy', render: (v, a) => a.platform === 'WEB' ? '-' : ({ OFF: '사용 안 함', MONITOR: '기록만', ENFORCE: '차단' } as Record<string, string>)[v] ?? v },
+            { title: '설정', render: (_, a) => <AppSettings app={a} defaults={defaults} /> },
+          ]} expandable={{ rowExpandable: (a) => a.platform === 'WEB', defaultExpandAllRows: true,
+            expandedRowRender: (a) => <WebWidgetSettings app={a} /> }} />
+        <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+          앱(Android·iOS) 설정 · 1번 누르기: 켜면 "휴대폰 인증을 하시려면 1번을 누르세요" 안내 후 1번을 눌러야 인증됩니다. 끄면 1번 없이 연결 즉시 인증합니다. 인증 요청에 type(0/1)을 보내면 그 값이 먼저 적용됩니다.
+          <br />웹사이트 설정 · 인증번호 자릿수: PC 화면(팝업)에 보여 주고 휴대폰 키패드로 누르는 숫자의 자릿수입니다(3~6자리). 인증번호 입력 시간: 전화가 연결된 뒤 숫자를 누를 수 있는 시간(10~60초).
+          <br />공통 · 전화 걸 수 있는 시간: 인증을 요청한 뒤 전화를 걸 수 있는 시간입니다(앱 15~120초, 웹 20~120초). 비워 두면 기본값을 씁니다.
+</Typography.Paragraph>
+      </Card>
+      <Card title="API Key">
+        {(data?.apiKeys ?? []).length === 0 ? <Typography.Text type="secondary">신청이 승인되면 API Key가 만들어집니다.</Typography.Text> : (
+          <Table<Record<string, any>> rowKey="id" pagination={false} size="small" dataSource={data.apiKeys}
+            columns={[
+              { title: 'Key 앞자리', dataIndex: 'keyPrefix', render: (v) => <Typography.Text code>{v}…</Typography.Text> },
+              { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
+              { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => (v > 0 ? Number(v).toLocaleString() : '무제한') },
+              { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} viewable={k.viewable} viewsLeft={k.viewsLeft} firstView={k.firstView} /> },
+            ]} />
         )}
-      />
-    </Card>
+      </Card>
+    </Space>
   );
 }

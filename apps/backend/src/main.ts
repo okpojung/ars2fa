@@ -4,14 +4,10 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { corsDelegate } from './common/cors';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    cors: {
-      origin: process.env.APP_URL ?? 'http://localhost:5173',
-      credentials: true,
-    },
-  });
+  const app = await NestFactory.create(AppModule, { cors: corsDelegate });
 
   app.use(cookieParser());
   app.useGlobalPipes(
@@ -32,7 +28,8 @@ async function bootstrap() {
   SwaggerModule.setup('api-docs', app, document);
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
+  // HOST=127.0.0.1 keeps the API (incl. /internal) on loopback behind the host nginx.
+  await app.listen(port, process.env.HOST ?? '0.0.0.0');
   console.log(`ars2fa backend listening on ${port}`);
 }
 

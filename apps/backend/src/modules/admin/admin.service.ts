@@ -1,3 +1,4 @@
+import { sealText } from '../ars-engine/phone.util';
 import {
   ForbiddenException,
   Injectable,
@@ -77,13 +78,14 @@ export class AdminService {
     });
   }
 
-  async approve(applicationId: string, adminId: string, comment?: string) {
+  /** adminId null = automatic approval by the system */
+  async approve(applicationId: string, adminId: string | null, comment?: string) {
     const application = await this.getApplicationOrThrow(applicationId);
     if (application.status !== 'SUBMITTED') {
       throw new ForbiddenException('Only submitted applications can be approved');
     }
 
-    const rawApiKey = generateApiKey('TEST');
+    const rawApiKey = generateApiKey('LIVE');
     const keyHash = hmacSha256(
       process.env.API_KEY_HASH_SECRET ?? 'dev-api-key-secret',
       rawApiKey,
@@ -110,16 +112,19 @@ export class AdminService {
           applicationId,
           keyHash,
           keyPrefix: getKeyPrefix(rawApiKey),
-          environment: 'TEST',
+          keyEnc: sealText(rawApiKey),
+          environment: 'LIVE',
           status: 'ACTIVE',
-          monthlyLimit: application.expectedMonthlyRequests,
+          // monthly limit: default unless the (old) application form gave a number; adjustable in API Key 운영
+          // no monthly limit for now (0 = unlimited); DEFAULT_MONTHLY_LIMIT sets one for new keys
+          monthlyLimit: Number(process.env.DEFAULT_MONTHLY_LIMIT ?? 0) || 0,
           rateLimitPerMinute: 60,
         },
       });
       await tx.reviewHistory.create({
         data: {
           applicationId,
-          adminUserId: adminId,
+          adminUserId: adminId ?? undefined,
           fromStatus: application.status,
           toStatus: 'APPROVED',
           comment,
@@ -127,9 +132,9 @@ export class AdminService {
       });
       await tx.auditLog.create({
         data: {
-          actorType: 'ADMIN',
+          actorType: adminId ? 'ADMIN' : 'SYSTEM',
           actorId: adminId,
-          action: 'APPLICATION_APPROVE_AND_KEY_ISSUE',
+          action: adminId ? 'APPLICATION_APPROVE_AND_KEY_ISSUE' : 'APPLICATION_AUTO_APPROVE',
           targetType: 'API_APPLICATION',
           targetId: applicationId,
           details: { apiKeyId: apiKey.id, keyPrefix: apiKey.keyPrefix },
@@ -138,10 +143,10 @@ export class AdminService {
       return { application: updated, apiKey };
     });
 
+    // the secret is not shown to the admin: the customer takes it in the console after an ARS phone check
     return {
       ...result,
-      rawApiKey,
-      notice: 'API Key 원문은 지금 한 번만 표시됩니다. 안전한 장소에 보관하세요.',
+      notice: '승인했습니다. 고객이 콘솔 API Key 메뉴에서 휴대폰 ARS 인증 후 키를 받습니다.',
     };
   }
 

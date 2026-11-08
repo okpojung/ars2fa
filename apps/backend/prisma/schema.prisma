@@ -33,6 +33,7 @@ enum ApplicationStatus {
 enum AppPlatform {
   ANDROID
   IOS
+  WEB // web site using the popup widget (widget.js + site key)
 }
 
 enum AppStatus {
@@ -81,6 +82,43 @@ enum ActorType {
   SYSTEM
 }
 
+// ---------------------------------------------------------------------------
+// ARS engine v1 (user-dialed ARS with randomized 0507 leasing)
+// ---------------------------------------------------------------------------
+
+enum VnStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ArsSessionMode {
+  APP // the customer's mobile app dials the leased number itself
+  PC  // a PC screen shows a QR (tel: URI); the phone scans and dials
+}
+
+enum ArsSessionStatus {
+  PENDING        // number leased, waiting for the call
+  CALL_CONFIRMED // call accepted, waiting for the PC code (PC mode only)
+  VERIFIED
+  FAILED
+  EXPIRED
+  CANCELED
+}
+
+enum IntegrityPolicy {
+  OFF     // not checked
+  MONITOR // checked and recorded, never blocks
+  ENFORCE // a session is refused unless the app proves it is genuine
+}
+
+enum IntegrityVerdict {
+  NOT_PROVIDED
+  PASSED
+  FAILED
+  ERROR
+  SKIPPED
+}
+
 model User {
   id              String           @id @default(cuid())
   email           String           @unique
@@ -90,6 +128,7 @@ model User {
   contactName     String
   contactPhone    String
   status          UserStatus       @default(ACTIVE)
+  arsSettings     Json?            // customer's own ARS settings (within the admin's ranges)
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
   createdAt       DateTime         @default(now())
@@ -143,11 +182,31 @@ model ApplicationApp {
   packageName    String?
   bundleId       String?
   storeUrl       String?
+  // Name read out / shown to the end user (phishing notice). Falls back to mobileAppName.
+  displayName    String?
+  integrityPolicy IntegrityPolicy @default(MONITOR)
+  // APP mode: caller must press 1 after the notice. null = system default (ARS settings). Set by the customer.
+  confirmKeyRequired Boolean?
+  /// WEB: digits of the code shown in the popup (null = account / service default)
+  pcCodeDigits       Int?
+  /// time to place the call after the request, seconds (app 15..120, web 20..120; null = service default)
+  leaseSeconds       Int?
+  /// WEB: time to key in the code after the call connects, seconds 10..60 (null = service default)
+  pcCodeSeconds      Int?
+  // WEB: public site key for widget.js and the origins allowed to use it (comma separated, e.g. https://lee.baro.me)
+  siteKey        String?         @unique
+  allowedOrigins String?
+  // Android: SHA-256 of the signing certificate as reported by Play Integrity (base64url, comma separated)
+  androidCertSha256 String?
+  // iOS: Apple developer Team ID used in the App Attest App ID (teamId.bundleId)
+  iosTeamId      String?
   status         AppStatus       @default(PENDING)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   application    ApiApplication  @relation(fields: [applicationId], references: [id])
   authRequests   AuthRequest[]
+  arsSessions    ArsSession[]
+  attestKeys     AppAttestKey[]
 
   @@unique([applicationId, mobileAppName, platform])
   @@index([mobileAppName, platform])
@@ -158,9 +217,15 @@ model ApiKey {
   applicationId      String
   keyPrefix          String
   keyHash            String            @unique
-  environment        ApiKeyEnvironment @default(TEST)
+  /// the key itself, AES-GCM sealed (shown again in the console after an ARS phone check); null = older key, hash only
+  keyEnc             String?
+  /// times the current key was viewed again in the console; at the limit the next view issues a new key
+  revealCount        Int               @default(0)
+  /// first time the current key was shown; null = not shown yet (the first view needs no ARS check)
+  firstShownAt       DateTime?
+  environment        ApiKeyEnvironment @default(LIVE)
   status             ApiKeyStatus      @default(ACTIVE)
-  monthlyLimit       Int               @default(10000)
+  monthlyLimit       Int               @default(0) // 0 = unlimited
   rateLimitPerMinute Int?
   lastUsedAt         DateTime?
   expiresAt          DateTime?
@@ -168,6 +233,7 @@ model ApiKey {
   updatedAt          DateTime          @updatedAt
   application        ApiApplication    @relation(fields: [applicationId], references: [id])
   authRequests       AuthRequest[]
+  arsSessions        ArsSession[]
 
   @@index([applicationId])
   @@index([status])
@@ -229,13 +295,211 @@ model AuthEvent {
 model ReviewHistory {
   id             String             @id @default(cuid())
   applicationId  String
-  adminUserId    String
+  /// null = the system (automatic approval)
+  adminUserId    String?
   fromStatus     ApplicationStatus?
   toStatus       ApplicationStatus
   comment        String?
   createdAt      DateTime           @default(now())
   application    ApiApplication     @relation(fields: [applicationId], references: [id])
-  adminUser      AdminUser          @relation(fields: [adminUserId], references: [id])
+  adminUser      AdminUser?         @relation(fields: [adminUserId], references: [id])
+}
+
+// 0507 virtual number. Every number is forwarded (once, statically) to one SKB 070 line;
+// the 070 lines are assigned in inventory order (ordinal % lineCount).
+model VirtualNumber {
+  id            Int        @id @default(autoincrement())
+  vn            String     @unique // digits only, leading zero kept (e.g. 050700952000)
+  rn            String     // SKB 070 the CallMix forwarding points to
+  ordinal       Int        @unique // inventory order 0..N-1
+  status        VnStatus   @default(ACTIVE)
+  leasedUntil   DateTime?
+  cooldownUntil DateTime?
+  lastUsedAt    DateTime?
+  useCount      Int        @default(0)
+  routing       VnRouting  @default(DYNAMIC) // DYNAMIC: CallMix forwarding switched on per lease; STATIC: always forwarded (test numbers)
+  linkState     VnLinkState @default(OFF)  // carrier forwarding state as far as we know
+  unlinkAfter   DateTime?  // forwarding must be switched off at/after this time
+  linkChangedAt DateTime?
+  linkFailCount Int        @default(0)
+  linkError     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  slots         VnCycleSlot[]
+  sessions      ArsSession[]
+
+  @@index([rn])
+  @@index([linkState, unlinkAfter])
+}
+
+enum VnRouting {
+  DYNAMIC
+  STATIC
+}
+
+enum VnLinkState {
+  OFF
+  ON
+  UNKNOWN // a link/unlink call is in flight or failed; treated as possibly on until an unlink succeeds
+}
+
+/// Every CallMix vnMapping call (forwarding on/off), for audit and latency monitoring.
+model CarrierCall {
+  id        String   @id @default(cuid())
+  vnId      Int
+  vn        String
+  action    String   // LINK | UNLINK
+  ok        Boolean
+  resCd     String
+  resMsg    String?
+  ms        Int
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([vnId, createdAt])
+}
+
+// One CSPRNG permutation of all active numbers. A new cycle is created only after every
+// slot of the current cycle has been used ("1 turn"), then numbers are handed out in slot order.
+model VnCycle {
+  id          Int           @id @default(autoincrement())
+  cycleNo     Int           @unique
+  size        Int
+  createdAt   DateTime      @default(now())
+  completedAt DateTime?
+  slots       VnCycleSlot[]
+}
+
+model VnCycleSlot {
+  id        Int           @id @default(autoincrement())
+  cycleId   Int
+  position  Int
+  vnId      Int
+  usedAt    DateTime?
+  skippedAt DateTime? // number disabled before its turn
+  cycle     VnCycle       @relation(fields: [cycleId], references: [id])
+  number    VirtualNumber @relation(fields: [vnId], references: [id])
+
+  @@unique([cycleId, position])
+  @@unique([cycleId, vnId])
+}
+
+model ArsSession {
+  id                 String           @id @default(cuid())
+  sessionId          String           @unique // public id returned to the customer
+  apiKeyId           String
+  applicationAppId   String
+  mobileAppName      String
+  displayName        String
+  clientPlatform     AppPlatform
+  mode               ArsSessionMode   @default(APP)
+  appsid             String?
+  purpose            String?
+  vnId               Int
+  vn                 String
+  rn                 String
+  status             ArsSessionStatus @default(PENDING)
+  failReason         String?
+  expectedPhoneHash  String?
+  callerPhoneHash    String?
+  callerPhoneMasked  String?
+  callerPhoneEnc     String?          // AES-GCM; returned once to the customer on success
+  pcCode             String?          // PC mode: code shown on the PC after the call connects, keyed in on the phone; cleared when finished
+  dialToken          String?          @unique // PC mode: one-time token of the mobile dial page (QR)
+  codeExpiresAt      DateTime?        // PC mode: deadline for keying in the code
+  widgetToken        String?          @unique // web widget: one-time token of the popup page
+  widgetOrigin       String?          // web widget: page origin the result is posted back to
+  widgetConsumedAt   DateTime?        // web widget: result consumed by the customer server (one use)
+  pcCodeSeconds      Int?             // PC mode: code entry time resolved at creation (customer setting or default)
+  pcClient           Json?            // browser that started the authentication (ip, browser, os, ...)
+  mobileClient       Json?            // phone that opened the QR page (ip, device, browser, os, screen, ...)
+  pcCodeAttempts     Int              @default(0)
+  confirmKey         Boolean          @default(true) // APP mode: press-1 required (app setting or system default at creation)
+  integrityVerdict   IntegrityVerdict @default(NOT_PROVIDED)
+  integrityDetail    Json?
+  pbxUniqueId        String?
+  authlogEventId     String?
+  callStartedAt      DateTime?
+  expiresAt          DateTime
+  finishedAt         DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  apiKey             ApiKey           @relation(fields: [apiKeyId], references: [id])
+  applicationApp     ApplicationApp   @relation(fields: [applicationAppId], references: [id])
+  number             VirtualNumber    @relation(fields: [vnId], references: [id])
+
+  @@index([vnId, status])
+  @@index([apiKeyId, createdAt])
+  @@index([status, expiresAt])
+}
+
+// Daou/CallMix AuthLog: carrier-side record of a call to a 0507 (vn) from a caller (an).
+model AuthLogEvent {
+  id            String   @id @default(cuid())
+  vn            String
+  anHash        String?
+  anMasked      String?
+  callStartAt   DateTime
+  callIdHash    String   @unique
+  receivedAt    DateTime @default(now())
+
+  @@index([vn, callStartAt])
+  @@index([anHash, callStartAt])
+}
+
+// A call that reached the PBX (.180) on an SKB 070 line.
+model PbxCall {
+  id           String   @id @default(cuid())
+  uniqueId     String   @unique
+  rn           String
+  callerHash   String?
+  callerMasked String?
+  startedAt    DateTime
+  result       String?
+  reason       String?
+  sessionId    String?
+  endedAt      DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([rn, startedAt])
+}
+
+model IntegrityChallenge {
+  id               String    @id @default(cuid())
+  nonce            String    @unique
+  apiKeyId         String
+  applicationAppId String
+  expiresAt        DateTime
+  usedAt           DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+model AppAttestKey {
+  id               String         @id @default(cuid())
+  applicationAppId String
+  keyId            String         @unique // base64
+  publicKeyPem     String
+  signCount        Int            @default(0)
+  environment      String         // appattest | appattestdevelop
+  createdAt        DateTime       @default(now())
+  lastUsedAt       DateTime?
+  applicationApp   ApplicationApp @relation(fields: [applicationAppId], references: [id])
+}
+
+/// Concurrent calls per minute (max of 2-second samples taken on the PBX host): SIP trunk channels and all Asterisk calls.
+model TrunkMinute {
+  minute     DateTime @id
+  trunkMax   Int
+  totalMax   Int
+  samples    Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
 }
 
 model AuditLog {

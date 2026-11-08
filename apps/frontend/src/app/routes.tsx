@@ -1,39 +1,57 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from '../shared/components/AppLayout';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { LoginPage } from '../pages/public/LoginPage';
 import { SignupPage } from '../pages/public/SignupPage';
-import { DashboardPage } from '../pages/user/DashboardPage';
+import { FormTestPage } from '../pages/public/FormTestPage';
+import { ConsoleDashboardPage } from '../pages/user/ConsoleDashboardPage';
+import { ConsoleSessionsPage } from '../pages/user/ConsoleSessionsPage';
+import { ConsoleTestPage } from '../pages/user/ConsoleTestPage';
+import { ConsoleDocsPage } from '../pages/user/ConsoleDocsPage';
+import { HomePage } from '../pages/public/HomePage';
+import { DocsPage } from '../pages/public/DocsPage';
 import { ApplicationListPage } from '../pages/user/ApplicationListPage';
 import { ApplicationFormPage } from '../pages/user/ApplicationFormPage';
 import { ApplicationDetailPage } from '../pages/user/ApplicationDetailPage';
-import { ApiKeyListPage } from '../pages/user/ApiKeyListPage';
-import { ApiKeyDetailPage } from '../pages/user/ApiKeyDetailPage';
-import { AuthRequestListPage } from '../pages/user/AuthRequestListPage';
-import { StatisticsPage } from '../pages/user/StatisticsPage';
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage';
 import { AdminApplicationsPage } from '../pages/admin/AdminApplicationsPage';
 import { AdminApiKeysPage } from '../pages/admin/AdminApiKeysPage';
 import { AdminAuthLogsPage } from '../pages/admin/AdminAuthLogsPage';
+import { AdminNumberPoolPage } from '../pages/admin/AdminNumberPoolPage';
+import { AdminArsSettingsPage } from '../pages/admin/AdminArsSettingsPage';
+import { AdminArsSessionsPage } from '../pages/admin/AdminArsSessionsPage';
+import { AdminAppSecurityPage } from '../pages/admin/AdminAppSecurityPage';
+import { AdminArsTestPage } from '../pages/admin/AdminArsTestPage';
+import { MobileDialPage } from '../pages/public/MobileDialPage';
+import { WidgetPopupPage } from '../pages/public/WidgetPopupPage';
 
 export const router = createBrowserRouter([
+  { path: '/', element: <HomePage /> },
+  { path: '/docs', element: <DocsPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/signup', element: <SignupPage /> },
   { path: '/admin/login', element: <LoginPage admin /> },
+  { path: '/m/ars/:token', element: <MobileDialPage /> },
+  { path: '/w/pc/:token', element: <WidgetPopupPage /> },
+  { path: '/form_test', element: <FormTestPage /> },
+  // old customer paths
+  ...['/applications', '/api-keys', '/auth-requests', '/statistics'].map((p) => ({ path: p, element: <Navigate to={p === '/auth-requests' ? '/console/sessions' : p === '/statistics' ? '/console' : `/console${p}`} replace /> })),
   {
     element: <ProtectedRoute />,
     children: [
       {
         element: <AppLayout />,
         children: [
-          { path: '/', element: <DashboardPage /> },
-          { path: '/applications', element: <ApplicationListPage /> },
-          { path: '/applications/new', element: <ApplicationFormPage /> },
-          { path: '/applications/:id', element: <ApplicationDetailPage /> },
-          { path: '/api-keys', element: <ApiKeyListPage /> },
-          { path: '/api-keys/:id', element: <ApiKeyDetailPage /> },
-          { path: '/auth-requests', element: <AuthRequestListPage /> },
-          { path: '/statistics', element: <StatisticsPage /> },
+          { path: '/console', element: <ConsoleDashboardPage /> },
+          { path: '/console/applications', element: <ApplicationListPage /> },
+          { path: '/console/applications/new', element: <ApplicationFormPage /> },
+          { path: '/console/applications/:id', element: <ApplicationDetailPage /> },
+          { path: '/console/api-keys', element: <Navigate to="/console/applications" replace /> },
+          { path: '/console/api-keys/:id', element: <Navigate to="/console/applications" replace /> },
+          { path: '/console/sessions', element: <ConsoleSessionsPage /> },
+          { path: '/console/test', element: <ConsoleTestPage /> },
+          { path: '/console/settings', element: <Navigate to="/console/applications" replace /> },
+          { path: '/console/docs', element: <ConsoleDocsPage /> },
         ],
       },
     ],
@@ -48,6 +66,11 @@ export const router = createBrowserRouter([
           { path: '/admin/applications', element: <AdminApplicationsPage /> },
           { path: '/admin/api-keys', element: <AdminApiKeysPage /> },
           { path: '/admin/auth-logs', element: <AdminAuthLogsPage /> },
+          { path: '/admin/ars/sessions', element: <AdminArsSessionsPage /> },
+          { path: '/admin/ars/pool', element: <AdminNumberPoolPage /> },
+          { path: '/admin/ars/apps', element: <AdminAppSecurityPage /> },
+          { path: '/admin/ars/settings', element: <AdminArsSettingsPage /> },
+          { path: '/admin/ars/test', element: <AdminArsTestPage /> },
         ],
       },
     ],

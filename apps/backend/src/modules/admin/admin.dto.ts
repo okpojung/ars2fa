@@ -7,8 +7,9 @@ export class AdminCommentDto {
 }
 
 export class UpdateApiKeyLimitsDto {
+  /** 0 = unlimited */
   @IsInt()
-  @Min(1)
+  @Min(0)
   monthlyLimit!: number;
 
   @IsOptional()

@@ -22,7 +22,9 @@ export function LoginPage({ admin = false }: { admin?: boolean }) {
         ? { ...data.admin, kind: 'admin' as const }
         : { ...data.user!, kind: 'user' as const };
       setSession(data.accessToken, principal);
-      navigate(admin ? '/admin' : '/');
+      // back to the page that asked for a login (same-site paths only)
+      const next = new URLSearchParams(window.location.search).get('next');
+      navigate(next && /^\/(?!\/)/.test(next) ? next : admin ? '/admin' : '/console');
     } catch (error) {
       message.error(error instanceof Error ? error.message : '로그인 실패');
     }
