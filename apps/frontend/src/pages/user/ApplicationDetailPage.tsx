@@ -71,7 +71,7 @@ export function ApplicationDetailPage() {
               { title: 'Key 앞자리', dataIndex: 'keyPrefix', render: (v) => <Typography.Text code>{v}…</Typography.Text> },
               { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'ACTIVE' ? 'green' : 'red'}>{v}</Tag> },
               { title: '월 한도', dataIndex: 'monthlyLimit', render: (v) => (v > 0 ? Number(v).toLocaleString() : '무제한') },
-              { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} viewable={k.viewable} /> },
+              { title: '', render: (_, k) => k.status !== 'REVOKED' && <RotateKeyButton id={k.id} viewable={k.viewable} viewsLeft={k.viewsLeft} firstView={k.firstView} /> },
             ]} />
         )}
       </Card>

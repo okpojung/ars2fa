@@ -215,6 +215,8 @@ model ApiKey {
   keyEnc             String?
   /// times the current key was viewed again in the console; at the limit the next view issues a new key
   revealCount        Int               @default(0)
+  /// first time the current key was shown; null = not shown yet (the first view needs no ARS check)
+  firstShownAt       DateTime?
   environment        ApiKeyEnvironment @default(LIVE)
   status             ApiKeyStatus      @default(ACTIVE)
   monthlyLimit       Int               @default(0) // 0 = unlimited

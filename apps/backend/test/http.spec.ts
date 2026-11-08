@@ -345,6 +345,11 @@ test('auto approval 10 minutes after submission; a package name of another custo
   expect(ok.status).toBe('APPROVED');
   expect(ok.apiKeys[0].monthlyLimit).toBe(0);
   expect(ok.reviewHistories[0]).toMatchObject({ adminUserId: null, toStatus: 'APPROVED' });
+  // first view of the new key: no ARS check; the next one needs it
+  const fv = await request(srv).post(`/api/console/api-keys/${ok.apiKeys[0].id}/reveal`).set(a1).send({}).expect(201);
+  expect(fv.body).toMatchObject({ firstView: true, viewsLeft: 3 });
+  expect(fv.body.apiKey).toMatch(/^ars2fa_[A-Za-z0-9_-]{43}$/);
+  await request(srv).post(`/api/console/api-keys/${ok.apiKeys[0].id}/reveal`).set(a1).send({}).expect(400);
   const waiting = await prisma.apiApplication.findUniqueOrThrow({ where: { id: dup.body.id } });
   expect(waiting.status).toBe('SUBMITTED');
   expect(waiting.adminComment).toContain('자동 승인 보류');
