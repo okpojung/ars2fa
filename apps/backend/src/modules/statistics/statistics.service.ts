@@ -47,7 +47,34 @@ export class StatisticsService {
       failReasons: reasons.map((r) => ({ reason: r.failReason ?? 'unknown', count: r._count._all })).sort((a, b) => b.count - a.count),
       daily,
     };
-    if (!admin) return out;
+    if (!admin) {
+      // per API (app / website) of this customer: type counts and authentication figures
+      const apps = await this.prisma.applicationApp.findMany({
+        where: { application: { userId: principal.id } },
+        select: { id: true, mobileAppName: true, platform: true, status: true, application: { select: { id: true, serviceName: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+      const ids = apps.map((a) => a.id);
+      const [g, gt, last] = await Promise.all([
+        this.prisma.arsSession.groupBy({ by: ['applicationAppId', 'status'], where: { applicationAppId: { in: ids } }, _count: { _all: true } }),
+        this.prisma.arsSession.groupBy({ by: ['applicationAppId', 'status'], where: { applicationAppId: { in: ids }, createdAt: { gte: today } }, _count: { _all: true } }),
+        this.prisma.arsSession.groupBy({ by: ['applicationAppId'], where: { applicationAppId: { in: ids } }, _max: { createdAt: true } }),
+      ]);
+      const sum = (rows: { applicationAppId: string; status: string; _count: { _all: number } }[], id: string, st?: string[]) =>
+        rows.filter((x) => x.applicationAppId === id && (!st || st.includes(x.status))).reduce((n, x) => n + x._count._all, 0);
+      out.apps = apps.map((a) => {
+        const ok = sum(g, a.id, ['VERIFIED']);
+        const bad = sum(g, a.id, ['FAILED', 'EXPIRED']);
+        return {
+          id: a.id, applicationId: a.application.id, serviceName: a.application.serviceName, name: a.mobileAppName, platform: a.platform, status: a.status,
+          total: sum(g, a.id), success: ok, failed: bad, canceled: sum(g, a.id, ['CANCELED']), successRate: rate(ok, ok + bad),
+          todayTotal: sum(gt, a.id), todaySuccess: sum(gt, a.id, ['VERIFIED']),
+          lastAt: last.find((x) => x.applicationAppId === a.id)?._max.createdAt ?? null,
+        };
+      });
+      out.appCounts = { ANDROID: apps.filter((a) => a.platform === 'ANDROID').length, IOS: apps.filter((a) => a.platform === 'IOS').length, WEB: apps.filter((a) => a.platform === 'WEB').length, total: apps.length };
+      return out;
+    }
 
     const now = new Date();
     const day = new Date(now.getTime() - 86400_000);

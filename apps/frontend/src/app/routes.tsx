@@ -14,8 +14,6 @@ import { DocsPage } from '../pages/public/DocsPage';
 import { ApplicationListPage } from '../pages/user/ApplicationListPage';
 import { ApplicationFormPage } from '../pages/user/ApplicationFormPage';
 import { ApplicationDetailPage } from '../pages/user/ApplicationDetailPage';
-import { ApiKeyListPage } from '../pages/user/ApiKeyListPage';
-import { ApiKeyDetailPage } from '../pages/user/ApiKeyDetailPage';
 import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage';
 import { AdminApplicationsPage } from '../pages/admin/AdminApplicationsPage';
 import { AdminApiKeysPage } from '../pages/admin/AdminApiKeysPage';
@@ -49,8 +47,8 @@ export const router = createBrowserRouter([
           { path: '/console/applications', element: <ApplicationListPage /> },
           { path: '/console/applications/new', element: <ApplicationFormPage /> },
           { path: '/console/applications/:id', element: <ApplicationDetailPage /> },
-          { path: '/console/api-keys', element: <ApiKeyListPage /> },
-          { path: '/console/api-keys/:id', element: <ApiKeyDetailPage /> },
+          { path: '/console/api-keys', element: <Navigate to="/console/applications" replace /> },
+          { path: '/console/api-keys/:id', element: <Navigate to="/console/applications" replace /> },
           { path: '/console/sessions', element: <ConsoleSessionsPage /> },
           { path: '/console/test', element: <ConsoleTestPage /> },
           { path: '/console/settings', element: <ConsoleArsSettingsPage /> },

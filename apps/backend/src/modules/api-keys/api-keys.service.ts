@@ -41,8 +41,9 @@ export class ApiKeysService {
     return (await this.withViewable([apiKey]))[0];
   }
 
-  adminList() {
-    return this.prisma.apiKey.findMany({
+  /** All keys with owner, apps and usage (sessions in total / this month / verified, last request). */
+  async adminList() {
+    const rows = await this.prisma.apiKey.findMany({
       include: {
         application: {
           include: {
@@ -53,6 +54,21 @@ export class ApiKeysService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    const ids = rows.map((r) => r.id);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const [all, ok, month] = await Promise.all([
+      this.prisma.arsSession.groupBy({ by: ['apiKeyId'], where: { apiKeyId: { in: ids } }, _count: { _all: true }, _max: { createdAt: true } }),
+      this.prisma.arsSession.groupBy({ by: ['apiKeyId'], where: { apiKeyId: { in: ids }, status: 'VERIFIED' }, _count: { _all: true } }),
+      this.prisma.arsSession.groupBy({ by: ['apiKeyId'], where: { apiKeyId: { in: ids }, createdAt: { gte: monthStart } }, _count: { _all: true } }),
+    ]);
+    const a = new Map(all.map((g) => [g.apiKeyId, g]));
+    const o = new Map(ok.map((g) => [g.apiKeyId, g._count._all]));
+    const mo = new Map(month.map((g) => [g.apiKeyId, g._count._all]));
+    return rows.map((r) => ({
+      ...r,
+      usage: { total: a.get(r.id)?._count._all ?? 0, verified: o.get(r.id) ?? 0, month: mo.get(r.id) ?? 0, lastAt: a.get(r.id)?._max.createdAt ?? null },
+    }));
   }
 
   async changeStatus(id: string, status: ApiKeyStatus, adminId: string) {

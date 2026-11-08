@@ -156,6 +156,10 @@ test('customer console: own sessions, per-app press-1 setting, key issue/rotate;
   await request(srv).post('/v1/ars/sessions').set('Authorization', `Bearer ${rot2.body.apiKey}`).send(id).expect(401);
 
   const mine = await request(srv).get('/api/console/sessions').set(auth).expect(200);
+  const stats = await request(srv).get('/api/statistics').set(auth).expect(200);
+  expect(stats.body.appCounts).toMatchObject({ ANDROID: 1, total: 1 });
+  expect(stats.body.apps[0]).toMatchObject({ platform: 'ANDROID', name: 'MyApp' });
+  expect(stats.body.apps[0].total).toBeGreaterThanOrEqual(2);
   expect(mine.body).toHaveLength(2);
   expect(JSON.stringify(mine.body)).not.toMatch(/callerPhoneEnc|pcCode|dialToken/);
   // other customers' resources are not reachable

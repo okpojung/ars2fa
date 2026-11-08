@@ -2,6 +2,7 @@ import { Card, Col, Row, Statistic, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiClient } from '../../shared/api/client';
+import { PlatformTag } from './ApplicationListPage';
 import { FAIL_REASON_LABEL } from '../admin/AdminDashboardPage';
 
 export const SESSION_STATUS: Record<string, [string, string]> = {
@@ -25,13 +26,30 @@ export function ConsoleDashboardPage() {
   const maxDaily = Math.max(1, ...daily.map((x) => x.total));
   return (
     <>
-      <Typography.Title level={2}>대시보드</Typography.Title>
+      <Typography.Title level={2}>사용자 대시보드</Typography.Title>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}><Card><Statistic title="오늘 인증" value={d?.today?.total ?? 0} /></Card></Col>
         <Col span={6}><Card><Statistic title="오늘 성공" value={d?.today?.success ?? 0} valueStyle={{ color: '#389e0d' }} /></Card></Col>
         <Col span={6}><Card><Statistic title="전체 인증" value={d?.total ?? 0} /></Card></Col>
         <Col span={6}><Card><Statistic title="성공률 (취소 제외)" value={d?.successRate ?? 0} suffix="%" /></Card></Col>
       </Row>
+      <Card size="small" style={{ marginBottom: 16 }} title="API별 인증 현황"
+        extra={<span>
+          API {d?.appCounts?.total ?? 0}개 · <PlatformTag p="ANDROID" />{d?.appCounts?.ANDROID ?? 0}개 <PlatformTag p="IOS" />{d?.appCounts?.IOS ?? 0}개 <PlatformTag p="WEB" />{d?.appCounts?.WEB ?? 0}개
+        </span>}>
+        <Table<Record<string, any>> size="small" rowKey="id" pagination={false} dataSource={d?.apps ?? []}
+          locale={{ emptyText: <Link to="/console/applications/new">API를 신청해 주세요</Link> }}
+          columns={[
+            { title: '종류', dataIndex: 'platform', render: (p) => <PlatformTag p={p} />, sorter: (a, b) => String(a.platform).localeCompare(String(b.platform)) },
+            { title: '서비스 / 앱', render: (_, r) => <Link to={`/console/applications/${r.applicationId}`}>{r.serviceName}{r.name && r.name !== r.serviceName ? ` · ${r.name}` : ''}</Link> },
+            { title: '오늘 (성공 / 전체)', render: (_, r) => `${r.todaySuccess} / ${r.todayTotal}`, sorter: (a, b) => a.todayTotal - b.todayTotal },
+            { title: '전체 인증', dataIndex: 'total', sorter: (a, b) => a.total - b.total, defaultSortOrder: 'descend' },
+            { title: '성공', dataIndex: 'success', render: (v) => <span style={{ color: '#389e0d' }}>{v}</span> },
+            { title: '실패·시간초과', dataIndex: 'failed', render: (v) => <span style={{ color: v ? '#cf1322' : undefined }}>{v}</span> },
+            { title: '성공률', dataIndex: 'successRate', render: (v, r) => (r.success + r.failed ? `${v}%` : '-') },
+            { title: '최근 인증', dataIndex: 'lastAt', render: (v) => (v ? new Date(v).toLocaleString('ko-KR', { hour12: false }) : '-') },
+          ]} />
+      </Card>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={14}>
           <Card title="최근 14일" size="small">

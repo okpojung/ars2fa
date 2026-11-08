@@ -37,9 +37,8 @@ export function AppLayout() {
         { key: '/admin/ars/test', icon: <PhoneOutlined />, label: <Link to="/admin/ars/test">ARS 실통화 시험</Link> },
       ]
     : [
-        { key: '/console', icon: <DashboardOutlined />, label: <Link to="/console">대시보드</Link> },
+        { key: '/console', icon: <DashboardOutlined />, label: <Link to="/console">사용자 대시보드</Link> },
         { key: '/console/applications', icon: <AppstoreOutlined />, label: <Link to="/console/applications">API 신청·앱 설정</Link> },
-        { key: '/console/api-keys', icon: <KeyOutlined />, label: <Link to="/console/api-keys">API Key</Link> },
         { key: '/console/sessions', icon: <ApiOutlined />, label: <Link to="/console/sessions">인증 내역</Link> },
         { key: '/console/test', icon: <PhoneOutlined />, label: <Link to="/console/test">ARS 실통화 시험</Link> },
         { key: '/console/settings', icon: <SettingOutlined />, label: <Link to="/console/settings">ARS 설정</Link> },
