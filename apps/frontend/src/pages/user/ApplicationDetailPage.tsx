@@ -10,15 +10,17 @@ export const APPLICATION_STATUS: Record<string, string> = {
   DRAFT: '작성 중', SUBMITTED: '심사 중 (약 10분 뒤 자동 승인)', NEEDS_REVISION: '보완 요청', APPROVED: '승인', REJECTED: '반려', PENDING: '심사 대기', SUSPENDED: '정지',
 };
 
-function AppSettings({ app, defaultConfirm }: { app: Record<string, any>; defaultConfirm?: boolean }) {
+function AppSettings({ app, defaultConfirm, defaultDigits }: { app: Record<string, any>; defaultConfirm?: boolean; defaultDigits?: number }) {
   const qc = useQueryClient();
   const initial = app.confirmKeyRequired === null || app.confirmKeyRequired === undefined ? 'default' : app.confirmKeyRequired ? 'on' : 'off';
   const [confirm, setConfirm] = useState<string>(initial);
   const [name, setName] = useState<string>(app.displayName ?? '');
+  const [digits, setDigits] = useState<string>(app.pcCodeDigits ? String(app.pcCodeDigits) : 'default');
+  const web = app.platform === 'WEB';
   const save = useMutation({
-    mutationFn: async () => (await apiClient.patch(`/console/apps/${app.id}/settings`, {
-      confirmKeyRequired: confirm === 'default' ? null : confirm === 'on', displayName: name,
-    })).data,
+    mutationFn: async () => (await apiClient.patch(`/console/apps/${app.id}/settings`, web
+      ? { pcCodeDigits: digits === 'default' ? null : Number(digits), displayName: name }
+      : { confirmKeyRequired: confirm === 'default' ? null : confirm === 'on', displayName: name })).data,
     onSuccess: () => { message.success('저장했습니다. 다음 인증부터 적용됩니다.'); qc.invalidateQueries({ queryKey: ['application'] }); },
     onError: (e) => message.error((e as Error).message),
   });
@@ -26,12 +28,20 @@ function AppSettings({ app, defaultConfirm }: { app: Record<string, any>; defaul
     <Space wrap>
       <span>안내 서비스 이름</span>
       <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={app.mobileAppName} maxLength={40} style={{ width: 170 }} />
-      <span>1번 누르기</span>
-      <Select value={confirm} onChange={setConfirm} style={{ width: 190 }} options={[
-        { value: 'default', label: `서비스 기본값 (${defaultConfirm === false ? '끔' : '켬'})` },
-        { value: 'on', label: '켬 (안내 후 1번)' },
-        { value: 'off', label: '끔 (바로 인증)' },
-      ]} />
+      {web ? (<>
+        <span>인증번호 자릿수</span>
+        <Select value={digits} onChange={setDigits} style={{ width: 160 }} options={[
+          { value: 'default', label: `기본값 (${defaultDigits ?? 3}자리)` },
+          ...[3, 4, 5, 6].map((n) => ({ value: String(n), label: `${n}자리` })),
+        ]} />
+      </>) : (<>
+        <span>1번 누르기</span>
+        <Select value={confirm} onChange={setConfirm} style={{ width: 190 }} options={[
+          { value: 'default', label: `기본값 (${defaultConfirm === false ? '끔' : '켬'})` },
+          { value: 'on', label: '켬 (안내 후 1번)' },
+          { value: 'off', label: '끔 (바로 인증)' },
+        ]} />
+      </>)}
       <Button type="primary" size="small" loading={save.isPending} onClick={() => save.mutate()}>저장</Button>
     </Space>
   );
@@ -56,13 +66,13 @@ export function ApplicationDetailPage() {
             { title: '앱', render: (_, a) => <><b>{a.mobileAppName}</b> <Tag>{a.platform}</Tag><br /><Typography.Text type="secondary">{a.packageName ?? a.bundleId ?? ''}</Typography.Text></> },
             { title: '상태', dataIndex: 'status', render: (v) => <Tag color={v === 'APPROVED' ? 'green' : undefined}>{APPLICATION_STATUS[v] ?? v}</Tag> },
             { title: '앱 위조 방지', dataIndex: 'integrityPolicy', render: (v, a) => a.platform === 'WEB' ? '-' : ({ OFF: '사용 안 함', MONITOR: '기록만', ENFORCE: '차단' } as Record<string, string>)[v] ?? v },
-            { title: '설정', render: (_, a) => <AppSettings app={a} defaultConfirm={defaults?.confirmKeyRequired} /> },
+            { title: '설정', render: (_, a) => <AppSettings app={a} defaultConfirm={defaults?.confirmKeyRequired} defaultDigits={defaults?.pcCodeDigits} /> },
           ]} expandable={{ rowExpandable: (a) => a.platform === 'WEB', defaultExpandAllRows: true,
             expandedRowRender: (a) => <WebWidgetSettings app={a} /> }} />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          1번 누르기: 켜면 "휴대폰 인증을 하시려면 1번을 누르세요" 안내 후 1번을 눌러야 인증됩니다. 끄면 1번 없이 연결 즉시 인증합니다. 인증 요청에 type(0/1)을 보내면 그 값이 먼저 적용됩니다.
-          앱 인증에만 적용되며, PC 인증은 화면의 숫자를 휴대폰으로 누르는 방식입니다.
-        </Typography.Paragraph>
+          앱(Android·iOS) 설정 · 1번 누르기: 켜면 "휴대폰 인증을 하시려면 1번을 누르세요" 안내 후 1번을 눌러야 인증됩니다. 끄면 1번 없이 연결 즉시 인증합니다. 인증 요청에 type(0/1)을 보내면 그 값이 먼저 적용됩니다.
+          <br />웹사이트 설정 · 인증번호 자릿수: PC 화면(팝업)에 보여 주고 휴대폰 키패드로 누르는 숫자의 자릿수입니다(3~6자리).
+</Typography.Paragraph>
       </Card>
       <Card title="API Key">
         {(data?.apiKeys ?? []).length === 0 ? <Typography.Text type="secondary">신청이 승인되면 API Key가 만들어집니다.</Typography.Text> : (

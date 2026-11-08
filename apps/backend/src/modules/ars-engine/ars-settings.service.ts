@@ -18,7 +18,7 @@ export const ARS_SETTING_DEFAULTS: ArsSettings = {
   leaseSecondsApp: 30,
   leaseSecondsPc: 30,
   pcCodeSeconds: 15,
-  pcCodeDigits: 4,
+  pcCodeDigits: 3,
   cooldownSeconds: 120,
   authlogWaitSeconds: 6,
   confirmKeyRequired: true,

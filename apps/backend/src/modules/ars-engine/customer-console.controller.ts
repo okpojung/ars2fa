@@ -1,7 +1,7 @@
 import { openText, sealText } from './phone.util';
 import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../../common/auth.guard';
 import { generateApiKey, getKeyPrefix, hmacSha256 } from '../../common/crypto.util';
 import { RedisService } from '../../common/redis.service';
@@ -26,6 +26,8 @@ export class AppSettingsDto {
   /** true = press 1 required, false = not required, null = follow the service default */
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsBoolean() confirmKeyRequired?: boolean | null;
   @IsOptional() @IsString() @MaxLength(40) displayName?: string;
+  /** WEB: digits of the code shown in the popup, 3..6; null = account / service default */
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(3) @Max(6) pcCodeDigits?: number | null;
   /** WEB: origins allowed to use the widget (comma separated) */
   @IsOptional() @IsString() @MaxLength(1000) allowedOrigins?: string;
 }
@@ -101,7 +103,11 @@ export class CustomerConsoleController {
     const userId = this.userId(req);
     const app = await this.prisma.applicationApp.findFirst({ where: { id: appId, application: { userId } } });
     if (!app) throw new NotFoundException('APP_NOT_FOUND');
-    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null; allowedOrigins?: string | null } = {};
+    const data: { confirmKeyRequired?: boolean | null; displayName?: string | null; allowedOrigins?: string | null; pcCodeDigits?: number | null } = {};
+    if (dto.pcCodeDigits !== undefined) {
+      if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
+      data.pcCodeDigits = dto.pcCodeDigits;
+    }
     if (dto.allowedOrigins !== undefined) {
       if (app.platform !== 'WEB') throw new ForbiddenException('WEB_APP_ONLY');
       const list = parseOrigins(dto.allowedOrigins);
@@ -111,9 +117,9 @@ export class CustomerConsoleController {
     if (dto.confirmKeyRequired !== undefined) data.confirmKeyRequired = dto.confirmKeyRequired;
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     const updated = await this.prisma.applicationApp.update({ where: { id: app.id }, data,
-      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, integrityPolicy: true, status: true, allowedOrigins: true, siteKey: true } });
+      select: { id: true, mobileAppName: true, platform: true, displayName: true, confirmKeyRequired: true, pcCodeDigits: true, integrityPolicy: true, status: true, allowedOrigins: true, siteKey: true } });
     await this.prisma.auditLog.create({ data: { actorType: 'USER', actorId: userId, action: 'APP_SETTINGS_UPDATE', targetType: 'APPLICATION_APP', targetId: app.id,
-      details: { before: { confirmKeyRequired: app.confirmKeyRequired, displayName: app.displayName }, after: data } as never } });
+      details: { before: { confirmKeyRequired: app.confirmKeyRequired, pcCodeDigits: app.pcCodeDigits, displayName: app.displayName }, after: data } as never } });
     return updated;
   }
 

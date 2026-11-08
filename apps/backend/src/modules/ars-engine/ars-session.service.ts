@@ -111,7 +111,9 @@ export class ArsSessionService {
     const { leased, expiresAt } = await this.leaseAndLink(ttl, s.cooldownSeconds);
     const sessionId = `ars_${randomBytes(15).toString('base64url')}`;
     // PC mode: code shown on the PC once the call is connected, keyed in on the phone; QR opens a one-time dial page
-    const pcCode = mode === 'PC' ? Array.from({ length: s.pcCodeDigits }, () => String(randomInt(10))).join('') : null;
+    // code length: the app's own setting (per API key), otherwise the account / service default
+    const digits = client.app.pcCodeDigits ?? s.pcCodeDigits;
+    const pcCode = mode === 'PC' ? Array.from({ length: digits }, () => String(randomInt(10))).join('') : null;
     const dialToken = mode === 'PC' ? randomBytes(18).toString('base64url') : null;
     const session = await this.prisma.arsSession.create({
       data: {

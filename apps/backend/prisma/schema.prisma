@@ -187,6 +187,8 @@ model ApplicationApp {
   integrityPolicy IntegrityPolicy @default(MONITOR)
   // APP mode: caller must press 1 after the notice. null = system default (ARS settings). Set by the customer.
   confirmKeyRequired Boolean?
+  /// WEB: digits of the code shown in the popup (null = account / service default)
+  pcCodeDigits       Int?
   // WEB: public site key for widget.js and the origins allowed to use it (comma separated, e.g. https://lee.baro.me)
   siteKey        String?         @unique
   allowedOrigins String?

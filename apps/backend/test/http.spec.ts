@@ -69,11 +69,11 @@ test('PC mode end to end over HTTP: dial page -> PBX connect -> code shown -> PB
     .send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: '888' }).expect(200);
   const con = await request(srv).post('/internal/pbx/connect').type('form')
     .send({ rn: s.rn, caller: '01097111104', uid: 'pc.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
-  expect(con.text).toBe('PC:4:11');
+  expect(con.text).toBe('PC:3:11');
   const st = await request(srv).post('/v1/ars/sessions/status')
     .send({ api_key: c.key, mobile_app_name: 'BS Point', client_platform: 'ANDROID', package_name: c.identity.package_name, session_id: created.body.session_id }).expect(200);
   expect(st.body.status).toBe('CALL_CONFIRMED');
-  expect(st.body.pc_code).toMatch(/^[0-9]{4}$/);
+  expect(st.body.pc_code).toMatch(/^[0-9]{3}$/);
   expect(st.body.server_time).toBeTruthy();
   const code = await request(srv).post('/internal/pbx/code').type('form').send({ uid: 'pc.1', code: st.body.pc_code, key: KEY }).expect(200);
   expect(code.text).toBe('OK');
@@ -186,7 +186,7 @@ test('web widget: registered origin only, popup flow, one-time server verificati
   expect(s.mode).toBe('PC');
   await request(srv).post('/internal/authlog').set('X-Internal-Key', KEY).send({ vn: s.vn, an: '01097111104', callStartTime: kst(new Date()), callId: '999' }).expect(200);
   const con = await request(srv).post('/internal/pbx/connect').type('form').send({ rn: s.rn, caller: '01097111104', uid: 'w.1', t0: String(Math.floor(Date.now() / 1000)), key: KEY }).expect(200);
-  expect(con.text).toMatch(/^PC:4:/);
+  expect(con.text).toMatch(/^PC:3:/);
   pop = await request(srv).get(`/api/public/ars/widget/${token}`).expect(200);
   expect(pop.body.state).toBe('CALL_CONFIRMED');
   expect(pop.body.dial_page_url).toBeUndefined();

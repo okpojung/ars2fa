@@ -226,10 +226,10 @@ describe('call verification', () => {
     let s = await vnOf(r.session_id);
     await carrierLog(s.vn, '01097111104');
     const c1 = await sessions.verifyCall({ rn: s.rn, caller: '01097111104', uniqueId: 'p1', t0: new Date(), phase: 'connect' });
-    expect(c1).toMatchObject({ result: 'OK', mode: 'PC', digits: 4 });
+    expect(c1).toMatchObject({ result: 'OK', mode: 'PC', digits: 3 });
     const st = await sessions.status(client, r.session_id);
     expect(st).toMatchObject({ status: 'CALL_CONFIRMED', code_seconds: 15 });
-    expect(st.pc_code).toMatch(/^[0-9]{4}$/);
+    expect(st.pc_code).toMatch(/^[0-9]{3}$/);
     expect(new Date(st.code_expires_at as string).getTime()).toBeGreaterThan(Date.now() + 12_000);
     expect(c1.readTimeout).toBe(11); // 15 s minus the 4 s guidance prompt
     // forwarding switched back as soon as the call is connected (immediate carrier call, no sweeper needed)
@@ -316,6 +316,16 @@ describe('call verification', () => {
     expect((await vnOf(r.session_id)).status).toBe('VERIFIED');
     // a finished session cannot be switched again
     expect(await sessions.sameDevice(token, {} as never)).toBeNull();
+  });
+
+  test('code length: service default 3 digits, the app (API key) setting wins', async () => {
+    const { app } = await setup();
+    const r1 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { mode: 'PC', expected_phone: '01097111104' });
+    expect((await vnOf(r1.session_id)).pcCode).toMatch(/^[0-9]{3}$/);
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { pcCodeDigits: 5 } });
+    const r2 = await sessions.create(await auth.verify(await seedIdentity(app.id)), { mode: 'PC', expected_phone: '01097111104' });
+    expect((await vnOf(r2.session_id)).pcCode).toMatch(/^[0-9]{5}$/);
+    await prisma.applicationApp.update({ where: { id: app.id }, data: { pcCodeDigits: null } });
   });
 
   test('request type overrides the app setting: 0 = no key press, 1 = press 1', async () => {
